@@ -1,0 +1,44 @@
+name: Deploy honker.dev
+
+# Builds the Astro Starlight site and deploys to Cloudflare Pages
+# via wrangler. Production on main; PRs get preview URLs.
+#
+# Requires repo secrets:
+#   CLOUDFLARE_API_TOKEN   - scope: Pages Edit, account: honker
+#   CLOUDFLARE_ACCOUNT_ID  - the account ID from `wrangler whoami`
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: |
+            pages deploy dist
+            --project-name=honker
+            --branch=${{ github.head_ref || github.ref_name }}
