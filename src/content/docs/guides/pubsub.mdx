@@ -111,7 +111,7 @@ for await (const notif of db.listen('orders')) {
   </TabItem>
   <TabItem label="Rust">
 ```rust
-// Blocking iterator; async wrapper is on the roadmap.
+// Blocking iterator; wakes on WAL commits.
 for notif in db.listen("orders")? {
     let notif = notif?;
     println!("{} {}", notif.channel, notif.payload);

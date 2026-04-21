@@ -267,7 +267,6 @@ for job in &jobs { process(&job.payload); }
 ```go
 jobs, _ := q.ClaimBatch("worker-1", 100)
 for _, j := range jobs { process(j.Payload); j.Ack() }
-// typed BatchAck is on the roadmap.
 ```
   </TabItem>
   <TabItem label="SQL (extension)">
