@@ -1,52 +1,136 @@
 ---
-// Custom SocialIcons override — wraps Starlight's default and
-// prepends a GitHub star-count badge next to the icon. Star count
-// is fetched at build time via the public GitHub API; no token
-// needed for the read-only repo endpoint.
+// Custom SocialIcons override — prepends a GitHub star-count badge
+// to the social-icons cluster.
+//
+// Strategy: build-time fetch renders an initial value so there's
+// no layout shift + the SSR HTML has a real number. Client-side
+// hydration re-fetches on page load and updates the DOM so stars
+// don't go stale until the next deploy — matters once the page
+// is on Hacker News and stars move fast.
+//
+// localStorage cache (10 min TTL) keeps per-visitor GitHub API
+// calls to at most a handful per hour, well under the unauth
+// rate limit of 60/hr per IP.
 import Default from '@astrojs/starlight/components/SocialIcons.astro';
 
-// Fetch stars at build time. If the API call fails (rate limit,
-// network), we just skip the badge — the icon still renders.
-let stars: string | null = null;
+const REPO = 'russellromney/honker';
+
+function formatStars(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+// Build-time seed. If the fetch fails (offline CI, rate limit),
+// we still render the badge with "★" and let the client fill it.
+let initial = '';
 try {
-  const res = await fetch(
-    'https://api.github.com/repos/russellromney/honker',
-    { headers: { 'User-Agent': 'honker-site-build' } },
-  );
+  const res = await fetch(`https://api.github.com/repos/${REPO}`, {
+    headers: { 'User-Agent': 'honker-site-build' },
+  });
   if (res.ok) {
     const data = await res.json();
-    const n = data.stargazers_count;
-    if (typeof n === 'number') {
-      stars = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    if (typeof data.stargazers_count === 'number') {
+      initial = formatStars(data.stargazers_count);
     }
   }
 } catch {
-  // No stars badge — not an error.
+  // Silent fallthrough — client-side fetch will fill it in.
 }
 ---
 
 <div class="honker-social">
-  {stars && (
-    <a
-      class="honker-stars"
-      href="https://github.com/russellromney/honker"
-      aria-label={`${stars} GitHub stars`}
+  <a
+    class="honker-stars"
+    href={`https://github.com/${REPO}`}
+    aria-label="Star honker on GitHub"
+    data-honker-stars
+    data-repo={REPO}
+  >
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      width="14"
+      height="14"
+      aria-hidden="true"
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        width="14"
-        height="14"
-        aria-hidden="true"
-      >
-        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>
-      </svg>
-      <span>{stars}</span>
-    </a>
-  )}
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>
+    </svg>
+    <span data-honker-stars-count>{initial || '—'}</span>
+  </a>
   <Default><slot /></Default>
 </div>
+
+<script is:inline>
+  (function () {
+    // Refresh cadence: 2 min TTL for localStorage. Short enough to
+    // feel live during a HN spike, long enough that a viewer
+    // refreshing in a loop can't exhaust the 60/hr/IP unauth rate
+    // limit (worst case ~30 req/hr).
+    const TTL_MS = 2 * 60 * 1000;
+    const KEY = 'honker:stars';
+    const el = document.querySelector('[data-honker-stars]');
+    if (!el) return;
+    const repo = el.getAttribute('data-repo');
+    const countEl = el.querySelector('[data-honker-stars-count]');
+    if (!repo || !countEl) return;
+
+    function format(n) {
+      return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+    }
+
+    function readCache() {
+      try {
+        const c = JSON.parse(localStorage.getItem(KEY) || 'null');
+        if (c && c.repo === repo && typeof c.n === 'number') return c;
+      } catch {}
+      return null;
+    }
+
+    function writeCache(n) {
+      try {
+        localStorage.setItem(
+          KEY,
+          JSON.stringify({ n, t: Date.now(), repo }),
+        );
+      } catch {}
+    }
+
+    function fetchAndUpdate() {
+      // Skip if we fetched within the TTL window.
+      const cached = readCache();
+      if (cached && Date.now() - cached.t < TTL_MS) {
+        countEl.textContent = format(cached.n);
+        return;
+      }
+      fetch(`https://api.github.com/repos/${repo}`, {
+        headers: { 'Accept': 'application/vnd.github+json' },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data || typeof data.stargazers_count !== 'number') return;
+          countEl.textContent = format(data.stargazers_count);
+          writeCache(data.stargazers_count);
+        })
+        .catch(() => {
+          // Leave the DOM at whatever the build-time or cached value was.
+        });
+    }
+
+    // 1. Use a cached value immediately (if any) so the count reflects
+    //    the last fetch, not the build-time seed.
+    const cached = readCache();
+    if (cached) countEl.textContent = format(cached.n);
+
+    // 2. Fresh fetch on page load (cache-gated by TTL).
+    fetchAndUpdate();
+
+    // 3. Re-check whenever the tab becomes visible again. Handles the
+    //    "left tab open for 20 min, came back" case without polling.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchAndUpdate();
+    });
+  })();
+</script>
 
 <style>
   .honker-social {
@@ -76,8 +160,6 @@ try {
   .honker-stars svg {
     flex-shrink: 0;
   }
-  /* On narrow screens the header gets tight — hide the star badge
-     but keep the icon. */
   @media (max-width: 50rem) {
     .honker-stars { display: none; }
   }
