@@ -72,6 +72,15 @@ mix deps.get
 
 Requires Elixir 1.15+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path.
   </TabItem>
+  <TabItem label="C++">
+```bash
+git clone https://github.com/russellromney/honker-cpp.git
+cd honker-cpp
+zig build
+```
+
+Requires Zig 0.16+, a C++17 compiler, and SQLite 3.9+ with extension loading. On macOS use Homebrew's `sqlite3` (Apple's system build omits `load_extension`). Link against the built `libhonker_cpp.a` static library and include `include/honker.hpp`.
+  </TabItem>
   <TabItem label="SQLite extension">
 Build from source. It's one crate:
 

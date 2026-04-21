@@ -188,6 +188,29 @@ case Honker.Queue.claim_one(q, "worker-1") do
 end
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("emails");
+
+    {
+        honker::Transaction tx{db.raw()};
+        tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", {42, 99});
+        q.enqueue_tx(tx, R"({"to":"alice","order_id":42})");
+        tx.commit();
+    }
+
+    auto job = q.claim_one("worker-1");
+    if (job) {
+        send_email(job->payload());
+        job->ack();
+    }
+}
+```
+  </TabItem>
   <TabItem label="SQL (extension)">
 ```sql
 .load ./libhonker_ext
@@ -254,6 +277,13 @@ bun add @russellthehippo/honker-bun
 ```elixir
 # mix.exs
 {:honker, "~> 0.1"}
+```
+  </TabItem>
+  <TabItem label="C++">
+```bash
+git clone https://github.com/russellromney/honker-cpp.git
+cd honker-cpp
+zig build
 ```
   </TabItem>
   <TabItem label="SQLite extension">
