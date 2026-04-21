@@ -10,6 +10,33 @@ export default defineConfig({
       title: 'Honker',
       description:
         'Durable queues, streams, pub/sub, and scheduler on SQLite. One file, zero servers.',
+      logo: {
+        src: './src/assets/honker.png',
+        // Keep the "Honker" wordmark beside the mark rather than
+        // replacing it. replacesTitle: true would hide the text.
+        replacesTitle: false,
+      },
+      favicon: '/favicon.png',
+      head: [
+        // Standard apple touch icon for when iOS users save-to-homescreen.
+        {
+          tag: 'link',
+          attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        },
+        // og:image for link unfurls (HN / Twitter / Slack).
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image', content: '/og-image.png' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:card', content: 'summary' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:image', content: '/og-image.png' },
+        },
+      ],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/russellromney/honker' },
       ],
