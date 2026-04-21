@@ -29,15 +29,16 @@ with db.transaction() as tx:
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const s = db.stream('orders');
 
-// honker_stream_publish(topic, payload_json) returns the new offset.
+s.publish({ id: 42, amount: 9900 });
+
+// Atomic with a business write
 const tx = db.transaction();
-tx.query(
-  "SELECT honker_stream_publish(?, ?)",
-  ['orders', JSON.stringify({ id: 42, amount: 9900 })],
-);
+tx.execute("INSERT INTO orders (id, amount) VALUES (?, ?)", [42, 9900]);
+s.publishTx(tx, { id: 42, amount: 9900 });
 tx.commit();
 ```
   </TabItem>
@@ -115,30 +116,9 @@ async for event in s.subscribe(consumer="email-worker"):
   </TabItem>
   <TabItem label="Node">
 ```js
-// Poll-based read; node binding doesn't yet wrap an async iterator.
-const ev = db.walEvents();
-let offset = getSavedOffset(db, 'orders', 'email-worker'); // small SELECT
-while (running) {
-  const tx = db.transaction();
-  const rowsJson = tx.query(
-    "SELECT honker_stream_read(?, ?, ?) AS j",
-    ['orders', offset, 100],
-  )[0].j;
-  tx.commit();
-
-  const rows = JSON.parse(rowsJson);
-  if (rows.length === 0) { await ev.next(); continue; }
-
-  for (const row of rows) {
-    await sendOrderEmail(JSON.parse(row.payload));
-    offset = row.offset;
-  }
-  const stx = db.transaction();
-  stx.query(
-    "SELECT honker_stream_save_offset(?, ?, ?)",
-    ['orders', 'email-worker', offset],
-  );
-  stx.commit();
+// Async iterator wakes on WAL commits, auto-saves offset.
+for await (const event of s.subscribe('email-worker')) {
+  await sendOrderEmail(event.payload);
 }
 ```
   </TabItem>
@@ -187,11 +167,9 @@ end
   </TabItem>
   <TabItem label="Bun">
 ```ts
-while (running) {
-  const batch = s.readFromConsumer("email-worker", 100);
-  if (batch.length === 0) { await Bun.sleep(100); continue; }
-  for (const event of batch) await sendOrderEmail(event.payload);
-  s.saveOffset("email-worker", batch[batch.length - 1].offset);
+// Async iterator; auto-saves offset every 1000 events.
+for await (const event of s.subscribe("email-worker")) {
+  await sendOrderEmail(event.payload);
 }
 ```
   </TabItem>

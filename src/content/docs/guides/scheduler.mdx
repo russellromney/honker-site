@@ -40,30 +40,27 @@ asyncio.run(scheduler.run())
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const sched = db.scheduler();
 
-// honker_scheduler_add(name, queue, cron, payload, priority, expires)
-const tx = db.transaction();
-tx.query(
-  "SELECT honker_scheduler_add(?, ?, ?, ?, ?, ?)",
-  ['nightly-backup', 'backups', '0 3 * * *',
-   JSON.stringify({ target: 's3' }), 0, 3600],
-);
-tx.query(
-  "SELECT honker_scheduler_add(?, ?, ?, ?, ?, ?)",
-  ['heartbeat', 'health', '*/5 * * * *', '{}', 0, null],
-);
-tx.commit();
+sched.add({
+  name: 'nightly-backup',
+  queue: 'backups',
+  cron: '0 3 * * *',
+  payload: { target: 's3' },
+  expiresS: 3600,
+});
 
-// Drive the scheduler loop in-process. Holds the leader lock
-// and enqueues on every cron boundary.
-while (running) {
-  const stx = db.transaction();
-  stx.query("SELECT honker_scheduler_tick()");
-  stx.commit();
-  await new Promise((r) => setTimeout(r, 1000));
-}
+sched.add({
+  name: 'heartbeat',
+  queue: 'health',
+  cron: '*/5 * * * *',
+});
+
+// Blocks; leader-elected. Cancel via AbortController.
+const ac = new AbortController();
+await sched.run({ owner: 'host-a', signal: ac.signal });
 ```
   </TabItem>
   <TabItem label="Rust">

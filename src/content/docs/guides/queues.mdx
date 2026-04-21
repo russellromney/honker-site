@@ -27,23 +27,14 @@ q.enqueue({"to": "timely@example.com"}, expires=3600) # drops out after 1h
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const q = db.queue('emails');
 
-// One-time: install the schema. honker.open bootstraps for you,
-// but low-level Node needs an explicit call.
-const setup = db.transaction();
-setup.query("SELECT honker_bootstrap()");
-setup.commit();
-
-// Enqueue. honker_enqueue signature:
-//   (queue, payload, run_at_or_null, delay_or_null, priority, max_attempts, expires_or_null)
-const tx = db.transaction();
-tx.query(
-  "SELECT honker_enqueue(?, ?, ?, ?, ?, ?, ?)",
-  ['emails', JSON.stringify({ to: 'alice@example.com' }), null, null, 0, 3, null],
-);
-tx.commit();
+q.enqueue({ to: 'alice@example.com' });
+q.enqueue({ to: 'bob@example.com' }, { delay: 60 });       // claimable in 60s
+q.enqueue({ to: 'urgent@example.com' }, { priority: 10 }); // higher = picked first
+q.enqueue({ to: 'timely@example.com' }, { expires: 3600 }); // drops after 1h
 ```
   </TabItem>
   <TabItem label="Rust">
@@ -144,45 +135,27 @@ async for job in q.claim("worker-1"):
   </TabItem>
   <TabItem label="Node">
 ```js
-// Poll-based claim; honker-node doesn't yet wrap an async iterator.
-// walEvents() gives you cross-process wake signals to drive a loop.
-const ev = db.walEvents();
-while (running) {
-  const tx = db.transaction();
-  const rowsJson = tx.query(
-    "SELECT honker_claim_batch(?, ?, ?, ?) AS j",
-    ['emails', 'worker-1', 1, 300],
-  )[0].j;
-  tx.commit();
-
-  const jobs = JSON.parse(rowsJson);
-  if (jobs.length === 0) {
-    await ev.next();  // block until the next WAL commit
-    continue;
-  }
-  const job = jobs[0];
+// claimWaker() blocks on WAL commits. No polling.
+const waker = q.claimWaker();
+while (true) {
+  const job = await waker.next('worker-1');
+  if (!job) break;
   try {
-    await sendEmail(JSON.parse(job.payload));
-    const atx = db.transaction();
-    atx.query("SELECT honker_ack_batch(?, ?)",
-              [JSON.stringify([job.id]), job.worker_id]);
-    atx.commit();
-  } catch (err) { /* retry via SQL */ }
+    await sendEmail(job.payload);
+    job.ack();
+  } catch (err) {
+    job.retry(60, String(err));
+  }
 }
 ```
   </TabItem>
   <TabItem label="Rust">
 ```rust
-loop {
-    if let Some(job) = q.claim_one("worker-1")? {
-        match send_email(&job.payload) {
-            Ok(_)  => { job.ack()?; }
-            Err(e) => { job.retry(60, &e.to_string())?; }
-        }
-    } else {
-        // wait for a WAL commit or sleep; honker-rs async iterator
-        // wrapper is on the roadmap.
-        std::thread::sleep(std::time::Duration::from_millis(100));
+let waker = q.claim_waker();
+while let Some(job) = waker.next("worker-1")? {
+    match send_email(&job.payload) {
+        Ok(_)  => { job.ack()?; }
+        Err(e) => { job.retry(60, &e.to_string())?; }
     }
 }
 ```

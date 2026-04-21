@@ -26,15 +26,17 @@ The notification commits with the surrounding transaction. If the tx rolls back,
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
 
+// Atomic with a business write
 const tx = db.transaction();
-tx.query(
-  "SELECT notify(?, ?)",
-  ['orders', JSON.stringify({ id: 42, event: 'placed' })],
-);
+tx.execute("INSERT INTO orders (id) VALUES (?)", [42]);
+tx.notify('orders', { id: 42, event: 'placed' });
 tx.commit();
+
+// Or fire-and-forget outside a tx
+db.notify('orders', { id: 42, event: 'placed' });
 ```
   </TabItem>
   <TabItem label="Rust">
@@ -102,23 +104,8 @@ async for notif in db.listen("orders"):
   </TabItem>
   <TabItem label="Node">
 ```js
-const ev = db.walEvents();
-let lastId = db.transaction()
-  .query("SELECT COALESCE(MAX(id), 0) AS m FROM _honker_notifications")[0].m;
-
-while (running) {
-  const tx = db.transaction();
-  const rows = tx.query(
-    "SELECT id, channel, payload FROM _honker_notifications WHERE id > ? AND channel = ? ORDER BY id",
-    [lastId, 'orders'],
-  );
-  tx.commit();
-
-  if (rows.length === 0) { await ev.next(); continue; }
-  for (const r of rows) {
-    console.log(r.channel, JSON.parse(r.payload));
-    lastId = r.id;
-  }
+for await (const notif of db.listen('orders')) {
+  console.log(notif.channel, notif.payload);
 }
 ```
   </TabItem>

@@ -107,35 +107,15 @@ job.ack()
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const q = db.queue('greetings');
 
-const tx = db.transaction();
-tx.query("SELECT honker_bootstrap()");
-tx.query(
-  "SELECT honker_enqueue(?, ?, ?, ?, ?, ?, ?)",
-  ['greetings', JSON.stringify({ name: 'world' }), null, null, 0, 3, null],
-);
-tx.commit();
+q.enqueue({ name: 'world' });
 
-const rtx = db.transaction();
-const jobs = JSON.parse(
-  rtx.query(
-    "SELECT honker_claim_batch(?, ?, ?, ?) AS j",
-    ['greetings', 'worker-1', 1, 300],
-  )[0].j,
-);
-rtx.commit();
-
-const job = jobs[0];
-console.log(`hello, ${JSON.parse(job.payload).name}!`);
-
-const atx = db.transaction();
-atx.query(
-  "SELECT honker_ack_batch(?, ?)",
-  [JSON.stringify([job.id]), job.worker_id],
-);
-atx.commit();
+const job = q.claimOne('worker-1');
+console.log(`hello, ${job.payload.name}!`);
+job.ack();
 ```
   </TabItem>
   <TabItem label="Rust">
@@ -348,15 +328,11 @@ with db.transaction() as tx:
   <TabItem label="Node">
 ```js
 const tx = db.transaction();
-tx.query(
+tx.execute(
   "INSERT INTO orders (id, total, customer_id) VALUES (?, ?, ?)",
   [42, 9900, 'alice'],
 );
-tx.query(
-  "SELECT honker_enqueue(?, ?, ?, ?, ?, ?, ?)",
-  ['emails', JSON.stringify({ order_id: 42, email_type: 'confirmation' }),
-   null, null, 0, 3, null],
-);
+q.enqueueTx(tx, { order_id: 42, email_type: 'confirmation' });
 tx.commit();
 ```
   </TabItem>

@@ -67,30 +67,24 @@ print(r.get(timeout=10))                    # blocks until worker runs it
   </TabItem>
   <TabItem label="Node">
 ```js
-const lit = require('@russellthehippo/honker-node');
-const db = lit.open('app.db');
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const q = db.queue('emails');
 
+// Enqueue in the same transaction as the business write.
 const tx = db.transaction();
-tx.query("SELECT honker_bootstrap()");
-tx.query(
-  "INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99],
-);
-tx.query(
-  "SELECT honker_enqueue(?, ?, ?, ?, ?, ?, ?)",
-  ['emails', JSON.stringify({ to: 'alice@example.com', order_id: 42 }),
-   null, null, 0, 3, null],
-);
+tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99]);
+q.enqueueTx(tx, { to: 'alice@example.com', order_id: 42 });
 tx.commit();
 
-// Claim + ack
-const ctx = db.transaction();
-const jobs = JSON.parse(
-  ctx.query(
-    "SELECT honker_claim_batch(?, ?, ?, ?) AS j",
-    ['emails', 'worker-1', 1, 300],
-  )[0].j,
-);
-ctx.commit();
+// Worker wakes on WAL commits, no polling.
+const waker = q.claimWaker();
+while (true) {
+  const job = await waker.next('worker-1');
+  if (!job) break;
+  await sendEmail(job.payload);
+  job.ack();
+}
 ```
   </TabItem>
   <TabItem label="Rust">
