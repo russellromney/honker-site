@@ -67,6 +67,7 @@ export default defineConfig({
             { label: 'Streams', slug: 'guides/streams' },
             { label: 'Pub/Sub', slug: 'guides/pubsub' },
             { label: 'Scheduler', slug: 'guides/scheduler' },
+            { label: 'Using with an ORM', slug: 'guides/orm' },
           ],
         },
         {
