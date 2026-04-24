@@ -116,7 +116,7 @@ async for event in s.subscribe(consumer="email-worker"):
   </TabItem>
   <TabItem label="Node">
 ```js
-// Async iterator wakes on WAL commits, auto-saves offset.
+// Async iterator wakes on any commit to the db, auto-saves offset.
 for await (const event of s.subscribe('email-worker')) {
   await sendOrderEmail(event.payload);
 }

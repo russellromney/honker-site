@@ -211,7 +211,7 @@ Honker.Job.ack(db, job)
 
 ## A proper worker
 
-The worker loop waits on the database's write-ahead log and wakes within 1-2 ms when a new job lands. No polling.
+The worker loop wakes within 1-2 ms when a new job lands, via a shared 1 ms `PRAGMA data_version` poll on the database. No application-level polling.
 
 <Tabs syncKey="language">
   <TabItem label="Python">

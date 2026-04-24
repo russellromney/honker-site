@@ -47,7 +47,7 @@ with db.transaction() as tx:
     tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99])
     q.enqueue({"to": "alice@example.com", "order_id": 42}, tx=tx)
 
-# Worker wakes on WAL commit, no polling.
+# Worker wakes on any commit to the db, no polling.
 async for job in q.claim("worker-1"):
     await send_email(job.payload)
     job.ack()
@@ -77,7 +77,7 @@ tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99]);
 q.enqueueTx(tx, { to: 'alice@example.com', order_id: 42 });
 tx.commit();
 
-// Worker wakes on WAL commits, no polling.
+// Worker wakes on any commit to the db, no polling.
 const waker = q.claimWaker();
 while (true) {
   const job = await waker.next('worker-1');
@@ -230,9 +230,9 @@ SELECT honker_ack_batch('[1,2,3]', 'worker-1');
 
 ## How it works
 
-honker polls SQLite's `.db-wal` file via `stat(2)` every millisecond. Each commit changes the WAL mtime, and a background thread fans that tick out to every subscriber. Subscribers run `SELECT ... WHERE id > last_seen` when woken, yielding new rows. One stat thread per database regardless of subscriber count.
+honker polls SQLite's `PRAGMA data_version` every millisecond. That's a monotonic counter SQLite increments on every commit from any connection, journal mode, or process — a ~3 µs read for a precise wake signal. A background thread fans the tick out to every subscriber, which runs `SELECT ... WHERE id > last_seen` and yields new rows. One poller thread per database regardless of subscriber count.
 
-Idle cost is one `stat(2)` per millisecond per database — no SQL, no page-cache pressure, no writer-lock contention. Listener count scales for free because the wake signal is a file stat, not a query.
+Idle cost is that one lightweight SELECT per millisecond per database — no page-cache pressure, no writer-lock contention, no kernel file watcher in the mix. Listener count scales for free because the wake signal is one shared poll, not one query per listener.
 
 The queue, stream, and pub/sub primitives are all INSERTs into tables managed by the extension. Calling `queue.enqueue(payload, tx=tx)` inside your business transaction means the job row is ACID with the `INSERT INTO orders` that preceded it. Rollback drops the job along with everything else.
 

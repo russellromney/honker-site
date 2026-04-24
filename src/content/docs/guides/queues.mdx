@@ -124,7 +124,7 @@ Claiming moves a row to `state='processing'` and sets `claim_expires_at = unixep
 <Tabs syncKey="language">
   <TabItem label="Python">
 ```python
-# Async iterator — wakes on every WAL commit, no polling.
+# Async iterator — wakes on every commit, no polling.
 async for job in q.claim("worker-1"):
     try:
         await send_email(job.payload)
@@ -135,7 +135,7 @@ async for job in q.claim("worker-1"):
   </TabItem>
   <TabItem label="Node">
 ```js
-// claimWaker() blocks on WAL commits. No polling.
+// claimWaker() blocks on commits. No polling.
 const waker = q.claimWaker();
 while (true) {
   const job = await waker.next('worker-1');

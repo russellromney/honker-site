@@ -93,7 +93,7 @@ SELECT notify('orders', '{"id":42,"event":"placed"}');
 
 ## Listen
 
-The listener starts from `MAX(id)` at attach time. Historical notifications are not replayed. Honker uses a shared stat-poll thread on the `.db-wal` file with a 1 ms cadence, so every listener in the process wakes on any WAL commit and then filters by channel at the `SELECT` level.
+The listener starts from `MAX(id)` at attach time. Historical notifications are not replayed. Honker runs a shared commit-poll thread at 1 ms cadence (one `PRAGMA data_version` read per database, counter increments on every commit from any connection in any journal mode), so every listener in the process wakes on any commit and then filters by channel at the `SELECT` level.
 
 <Tabs syncKey="language">
   <TabItem label="Python">
@@ -111,7 +111,7 @@ for await (const notif of db.listen('orders')) {
   </TabItem>
   <TabItem label="Rust">
 ```rust
-// Blocking iterator; wakes on WAL commits.
+// Blocking iterator; wakes on any commit to the db.
 for notif in db.listen("orders")? {
     let notif = notif?;
     println!("{} {}", notif.channel, notif.payload);
@@ -160,7 +160,7 @@ receive_loop.(receive_loop)
 
 ## Cross-process
 
-The WAL watcher fires on commits from *any* process. A FastAPI app, a CLI worker, and a cron job can all `notify()` the same channel, and a separate listener receives every signal within a few milliseconds. No coordination, no broker, no extra network hop.
+The commit watcher fires on commits from *any* process. A FastAPI app, a CLI worker, and a cron job can all `notify()` the same channel, and a separate listener receives every signal within a few milliseconds. No coordination, no broker, no extra network hop.
 
 ## Pruning
 
