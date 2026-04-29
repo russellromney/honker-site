@@ -30,6 +30,16 @@ SQLite is backing real work now — Bluesky's PDS, Fly's LiteFS, Turso, weekend 
 
 honker takes the approach that if SQLite is the primary datastore, the queue should live in the same file. That means `INSERT INTO orders` and `queue.enqueue(...)` commit in the same transaction. Rollback drops both. The queue is just rows in a table with a partial index.
 
+## What you can use it for
+
+- Cross-process `NOTIFY`/`LISTEN`-style signaling on a single SQLite file, without Redis or a broker
+- Durable work queues with retries, priority, delayed jobs, expiration, and dead letters
+- Transactional outbox patterns where your business write and enqueue commit together or roll back together
+- Durable streams with per-consumer offsets
+- Crontab-style periodic tasks with a leader-elected scheduler
+- Named locks, rate limiting, and opt-in task result storage
+- Thin cross-language bindings over the same extension-owned SQLite layout
+
 ## One example
 
 Enqueue atomically with a business write, then consume. Same `.db` file, same on-disk format, seven languages.

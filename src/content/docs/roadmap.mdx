@@ -1,0 +1,62 @@
+---
+title: Roadmap
+description: Where Honker stays focused, and which adjacent wrapper libraries may sit on top of it later.
+---
+
+Honker's current product boundary is durable messaging and scheduling in one SQLite file: queues, streams, pub/sub, periodic tasks, transactional enqueue, and the thin cross-language bindings around that shared layout.
+
+That focus matters. The homepage and README should keep telling the simple story first: if your app already uses SQLite, Honker gives it durable queues, streams, pub/sub, delayed jobs, periodic tasks, and transactional enqueue without adding Redis or a broker.
+
+## Current focus
+
+- Cross-process `NOTIFY`/`LISTEN`-style signaling on one `.db` file
+- Durable work queues with retries, priority, delayed jobs, expiration, and dead letters
+- Transactional enqueue alongside your business writes
+- Durable streams with per-consumer offsets
+- Crontab-style periodic tasks with a leader-elected scheduler
+- Thin bindings across Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, and raw SQLite
+
+Named locks and rate limiting exist today, but they currently make the most sense as supporting primitives inside Honker rather than as the headline product story.
+
+## Wrapper model
+
+Knocker points at the right shape for sibling projects:
+
+- `honker` stays the generic durable async substrate
+- a small Rust core owns the sibling project's schema and SQLite operations
+- thin language bindings expose a simple API on top
+
+That is a better fit than turning Honker itself into a bag of semi-related subsystems. If these ideas become real, they should be wrapper libraries on top of Honker, not ever-larger Honker modules.
+
+## Adjacent wrapper candidates
+
+### 1. Bouncer
+
+Lease and coordination for a named resource: claim, renew, release, inspect current owner, and expose a fencing token.
+
+Recommendation: this is the sharpest wrapper candidate. Honker already has named locks and internal coordination needs, so Bouncer could start as a cleanup and expansion of that surface, then become a small sibling library with its own contract and thin bindings.
+
+### 2. Stamp
+
+Idempotency state for webhook handlers, commands, HTTP endpoints, or enqueue wrappers: reserve a key, mark it in progress, and mark it completed or failed, optionally with a stored result.
+
+Recommendation: keep this as an adjacent project idea, not a Honker headline feature. It is broadly reusable, especially around enqueue dedupe and API boundaries, but it is not queue semantics. If it graduates, it should ship as a sibling wrapper rather than a large Honker subsystem.
+
+### 3. Breadcrumb
+
+An append-only semantic history in the same SQLite file: actor, action, object, metadata, correlation ID, and simple query views.
+
+Recommendation: interesting and easy to explain, but not urgent as a new repo. The best near-term move is to keep the idea documented and look for places where Honker's own enqueue/ack/retry/dead-letter lifecycle would benefit from an optional audit trail.
+
+### 4. Valve
+
+Durable shared quotas or token-bucket-ish rate limiting with inspectable bucket state.
+
+Recommendation: plausible, but later. Honker already has fixed-window rate limiting, so this is a real wrapper path if that surface grows sharper. Until then, the current built-in limiter is enough and keeps the product story simpler.
+
+## Recommendation
+
+- Do not create new repos yet.
+- Keep Honker's public story centered on durable messaging and scheduling.
+- Track adjacent wrapper ideas explicitly so they are preserved without making the main story feel speculative.
+- If one of these becomes a real sister project, start with Bouncer. Stamp is the next best candidate after that.
