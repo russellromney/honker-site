@@ -228,6 +228,19 @@ Console.WriteLine($"hello, {job!.Payload.GetProperty("name").GetString()}!");
 job.Ack();
 ```
   </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+SELECT honker_enqueue('greetings', '{"name":"world"}',
+                      NULL, NULL, 0, 3, NULL);
+
+SELECT honker_claim_batch('greetings', 'worker-1', 1, 300);
+-- Then ack the claimed job id from the JSON result above.
+SELECT honker_ack(1, 'worker-1');
+```
+  </TabItem>
 </Tabs>
 
 ## A proper worker
@@ -358,6 +371,21 @@ await foreach (var job in q.ClaimAsync("worker-1"))
 }
 ```
   </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+-- Claim one ready job.
+SELECT honker_claim_batch('emails', 'worker-1', 1, 300);
+
+-- On success:
+SELECT honker_ack(42, 'worker-1');
+
+-- Or on failure, schedule a retry 60 seconds out:
+SELECT honker_retry(42, 'worker-1', 60, 'smtp timeout');
+```
+  </TabItem>
 </Tabs>
 
 ## Atomic enqueue with business writes
@@ -457,6 +485,21 @@ using (var tx = db.BeginTransaction())
     q.Enqueue(new { order_id = 42, email_type = "confirmation" }, transaction: tx);
     tx.Commit();
 }
+```
+  </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+BEGIN;
+INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice');
+SELECT honker_enqueue(
+  'emails',
+  '{"order_id":42,"email_type":"confirmation"}',
+  NULL, NULL, 0, 3, NULL
+);
+COMMIT;
 ```
   </TabItem>
 </Tabs>
