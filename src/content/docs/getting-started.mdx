@@ -228,6 +228,26 @@ Console.WriteLine($"hello, {job!.Payload.GetProperty("name").GetString()}!");
 job.Ack();
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <iostream>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("greetings");
+
+    q.enqueue(R"({"name":"world"})");
+
+    if (auto job = q.claim_one("worker-1")) {
+        auto payload = nlohmann::json::parse(job->payload());
+        std::cout << "hello, " << payload["name"].get<std::string>() << "!\n";
+        job->ack();
+    }
+}
+```
+  </TabItem>
   <TabItem label="SQL">
 ```sql
 .load ./libhonker_ext
@@ -371,6 +391,32 @@ await foreach (var job in q.ClaimAsync("worker-1"))
 }
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <chrono>
+#include <thread>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("emails");
+
+    for (;;) {
+        if (auto job = q.claim_one("worker-1")) {
+            try {
+                send_email(job->payload());
+                job->ack();
+            } catch (const std::exception& e) {
+                job->retry(60, e.what());
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
+```
+  </TabItem>
   <TabItem label="SQL">
 ```sql
 .load ./libhonker_ext
@@ -484,6 +530,25 @@ using (var tx = db.BeginTransaction())
         42, 9900, "alice");
     q.Enqueue(new { order_id = 42, email_type = "confirmation" }, transaction: tx);
     tx.Commit();
+}
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("emails");
+
+    honker::Transaction tx{db.raw()};
+    sqlite3_exec(
+        tx.raw(),
+        "INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice')",
+        nullptr, nullptr, nullptr
+    );
+    q.enqueue_tx(tx, R"({"order_id":42,"email_type":"confirmation"})");
+    tx.commit();
 }
 ```
   </TabItem>
