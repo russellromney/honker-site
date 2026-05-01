@@ -18,6 +18,38 @@ That focus matters. The homepage and README should keep telling the simple story
 
 Named locks and rate limiting exist today, but they currently make the most sense as supporting primitives inside Honker rather than as the headline product story.
 
+## Binding strategy
+
+Bindings should converge on the same **core runtime parity**:
+
+- queues
+- streams
+- notify/listen or a clearly documented update-watcher story
+- delayed `run_at`
+- deadline wake
+- scheduler
+- `schedule`
+- 5-field cron, 6-field cron, and `@every <n><unit>`
+
+But not every binding has to carry the full Python task-framework layer.
+
+Python is still ahead there today with:
+
+- `@task`
+- `@periodic_task`
+- `TaskResult`
+- `wait_result()`
+- task registry
+- worker CLI
+
+That richer layer probably belongs only in a smaller set of first-class
+application bindings, while the other maintained bindings stay focused
+on being excellent wrappers over the shared SQLite-native runtime.
+
+The repo shape should move the same way: one source-of-truth repo for
+maintained bindings, not a convoy of independent repos plus submodule
+pins for every cross-language feature.
+
 ## Wrapper model
 
 Knocker points at the right shape for sibling projects:

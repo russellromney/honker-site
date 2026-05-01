@@ -1,0 +1,125 @@
+---
+title: Bindings
+description: How Honker thinks about cross-language parity, where Python is still ahead, and how maintained bindings should converge.
+---
+
+Honker has two different "parity" stories:
+
+1. **Core runtime parity**
+2. **Task-framework parity**
+
+Those are not the same thing.
+
+## Core runtime parity
+
+This is the bar every maintained binding should hit.
+
+It means the binding exposes the same shared SQLite-native runtime:
+
+- queues
+- jobs
+- delayed `run_at`
+- deadline wake
+- streams
+- notify/listen or a clearly documented update-watcher story
+- scheduler
+- results primitives
+- locks / rate limits where the binding claims them
+
+It also means the names should be as boringly similar as the language
+allows:
+
+- `run_at` / `runAt`
+- `schedule`
+- `cron` only as a compatibility alias
+- `@every <n><unit>`
+
+When users switch languages, the runtime concepts should feel the same.
+
+## Task-framework parity
+
+This is the richer layer Python already has:
+
+- `@task`
+- `@periodic_task`
+- `TaskResult`
+- `wait_result()`
+- task registry
+- worker CLI / task-runner ergonomics
+
+That is a larger product surface than "thin wrapper over the shared
+Honker runtime."
+
+Today, Python is ahead here. That is real, and it is okay to say
+plainly.
+
+## Current strategy
+
+Honker should push **core runtime parity** across all maintained
+bindings.
+
+Honker does **not** need to force full Python-style task-framework
+parity into every language package.
+
+That means:
+
+- every maintained binding should converge on the same runtime behavior
+- only a smaller set of bindings may carry the richer task layer
+
+## Likely tiers
+
+### Task-framework tier
+
+These are the best candidates for the richer product layer:
+
+- Python
+- .NET
+- maybe Node
+
+### Core-runtime tier
+
+These should still be great, but may stop at the shared runtime:
+
+- Go
+- Rust
+- Ruby
+- Elixir
+- Bun
+- C++
+
+That is not second-class. It is just a narrower promise.
+
+## Near-parity checklist
+
+For each maintained binding, we want a boring checklist:
+
+- queue enqueue / claim / ack / retry / fail / heartbeat
+- delayed `run_at`
+- deadline-aware wake
+- streams with resume-after-crash semantics
+- notify/listen or a clearly documented update-watcher equivalent
+- scheduler add / remove / tick / soonest / run
+- `schedule` as the canonical recurring name
+- 5-field cron
+- 6-field cron
+- `@every <n><unit>`
+- results primitives
+- cross-language interop proof
+
+If a binding has the richer task layer too, say so explicitly.
+If it does not, say that explicitly too.
+
+## Repo shape
+
+The current many-repos-plus-submodules setup made parity work much
+harder than it needed to be.
+
+The likely future shape is:
+
+- main repo stays the source of truth
+- maintained bindings live together in `packages/`
+- one feature can ship as one coordinated change
+- separate public binding repos, if kept, become mirrors or release
+  artifacts rather than the primary place humans edit
+
+That is the direction tracked in the roadmap.
