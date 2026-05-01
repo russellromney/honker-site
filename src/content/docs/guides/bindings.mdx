@@ -109,6 +109,58 @@ For each maintained binding, we want a boring checklist:
 If a binding has the richer task layer too, say so explicitly.
 If it does not, say that explicitly too.
 
+## Current maintained bindings
+
+| Binding | Core runtime | Wake / scheduling | Results primitives | Task framework layer | Tier |
+|---|---|---|---|---|---|
+| Python | Complete | Complete | Complete | `@task`, `@periodic_task`, `TaskResult`, `wait_result()`, worker CLI | Task-framework |
+| .NET | Complete | Complete | Complete | Not yet | Core-runtime today, likely task-framework candidate |
+| Node | Complete | Complete | Complete | Not yet | Core-runtime today, maybe task-framework candidate |
+| Rust | Complete | Complete | Complete | Not yet | Core-runtime |
+| Go | Complete | Complete | Complete | Not yet | Core-runtime |
+| Ruby | Complete | Complete | Complete | Not yet | Core-runtime |
+| Elixir | Complete | Complete | Partial higher-level ergonomics | Not yet | Core-runtime |
+| Bun | Complete | Complete | Complete | Not yet | Core-runtime |
+| C++ | Complete | Complete | Basic runtime surface | Not yet | Core-runtime |
+
+This table is intentionally boring. It is not trying to grade
+languages on vibes. It is just tracking the promise each binding makes.
+
+## What "complete" means here
+
+For the **core runtime** columns, "complete" means the binding exposes
+the shared Honker database/runtime surface and has proof around the
+important time-trigger behavior:
+
+- delayed `run_at`
+- deadline wake
+- scheduler / `schedule`
+- 5-field cron
+- 6-field cron
+- `@every <n><unit>`
+
+For the **task framework layer**, "not yet" means the binding does not
+currently ship the richer Python-style app-facing layer:
+
+- task decorators
+- caller-side `TaskResult`
+- task registry
+- worker CLI / managed task runner ergonomics
+
+That is a product choice, not automatically a defect.
+
+## What we do next
+
+The next parity push should happen in this order:
+
+1. move maintained bindings toward one source-of-truth repo shape
+2. keep the core-runtime checklist green across all maintained bindings
+3. decide which bindings should grow the richer task-framework layer
+4. only then start building that richer layer beyond Python
+
+That order keeps us from rebuilding the same feature nine times while
+the repo shape is still fighting us.
+
 ## Repo shape
 
 The current many-repos-plus-submodules setup made parity work much
