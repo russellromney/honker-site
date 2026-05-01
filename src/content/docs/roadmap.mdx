@@ -14,9 +14,21 @@ That focus matters. The homepage and README should keep telling the simple story
 - Transactional enqueue alongside your business writes
 - Durable streams with per-consumer offsets
 - Time-trigger scheduling with a leader-elected scheduler
-- Thin bindings across Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, .NET / C#, and raw SQLite
+- First-class bindings across Python, Node, Rust, Go, Ruby, Bun,
+  Elixir, C++, .NET / C#, and raw SQLite, maintained in the main repo
+  around the shared Rust core
 
 Named locks and rate limiting exist today, but they currently make the most sense as supporting primitives inside Honker rather than as the headline product story.
+
+## Binding model
+
+Honker is a Rust engine with language bindings, not a pile of unrelated
+client libraries. The maintained bindings live in the main repo so core
+changes, docs, examples, and parity tests can move together.
+
+Separate language-specific repositories may still be useful as mirrors
+or package-facing homes, but the main repo is the human source of truth
+for maintained binding work.
 
 ## Wrapper model
 
