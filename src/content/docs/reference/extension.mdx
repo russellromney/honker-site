@@ -26,6 +26,7 @@ SELECT honker_bootstrap();
 | `honker_fail(job_id, worker_id, error)` | 3 args | 1 if moved to dead |
 | `honker_heartbeat(job_id, worker_id, extend_s)` | 3 args | 1 if extended |
 | `honker_sweep_expired(queue)` | 1 arg | count moved to dead |
+| `honker_queue_next_claim_at(queue)` | 1 arg | next `run_at` / reclaim deadline, or 0 |
 
 ## Streams
 
@@ -53,6 +54,12 @@ The function name stays `notify()` (not `honker_notify`) to match `pg_notify`'s 
 | `honker_scheduler_tick(now_unix)` | 1 arg | JSON array of fires |
 | `honker_scheduler_soonest()` | 0 args | min `next_fire_at` (unix ts) |
 | `honker_cron_next_after(expr, from_unix)` | 2 args | next unix ts |
+
+`cron_expr` is the stored schedule expression. It can be:
+
+- 5-field cron
+- 6-field cron
+- `@every <n><unit>` like `@every 5s`
 
 ## Locks
 

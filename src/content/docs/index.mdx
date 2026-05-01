@@ -1,9 +1,9 @@
 ---
 title: Honker
-description: Durable queues, streams, pub/sub, and scheduler on SQLite. One file, zero servers.
+description: Durable queues, streams, pub/sub, and time-trigger scheduling on SQLite. One file, zero servers.
 template: splash
 hero:
-  tagline: Durable queues, streams, pub/sub, and a cron scheduler — inside your SQLite file.
+  tagline: Durable queues, streams, pub/sub, and time-trigger scheduling — inside your SQLite file.
   image:
     # Starlight positions this next to the tagline + actions in the
     # hero block. Dark-mode variant could go in image.dark if we add
@@ -36,7 +36,8 @@ honker takes the approach that if SQLite is the primary datastore, the queue sho
 - Durable work queues with retries, priority, delayed jobs, expiration, and dead letters
 - Transactional outbox patterns where your business write and enqueue commit together or roll back together
 - Durable streams with per-consumer offsets
-- Crontab-style periodic tasks with a leader-elected scheduler
+- Time-trigger scheduling with a leader-elected scheduler:
+  5-field cron, 6-field cron, and `@every <n><unit>`
 - Named locks, rate limiting, and opt-in task result storage
 - Thin cross-language bindings over the same extension-owned SQLite layout
 
@@ -57,7 +58,7 @@ with db.transaction() as tx:
     tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99])
     q.enqueue({"to": "alice@example.com", "order_id": 42}, tx=tx)
 
-# Worker wakes on any commit to the db, no polling.
+# Worker wakes on database updates or due deadlines.
 async for job in q.claim("worker-1"):
     await send_email(job.payload)
     job.ack()
@@ -87,7 +88,7 @@ tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99]);
 q.enqueueTx(tx, { to: 'alice@example.com', order_id: 42 });
 tx.commit();
 
-// Worker wakes on any commit to the db, no polling.
+// Worker wakes on database updates or due deadlines.
 const waker = q.claimWaker();
 while (true) {
   const job = await waker.next('worker-1');
