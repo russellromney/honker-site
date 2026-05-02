@@ -5,7 +5,10 @@ description: Guides and reference for honker — durable queues, streams, pub/su
 
 import { LinkCard, CardGrid } from '@astrojs/starlight/components';
 
-honker ships as a SQLite loadable extension plus bindings for Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, and .NET / C#. The extension defines the on-disk format; bindings are thin wrappers that share it.
+honker ships as a Rust-built SQLite loadable extension plus bindings
+for Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, and .NET / C#.
+The extension defines the on-disk format; bindings are first-class
+wrappers that live in the main repo and share the same Rust core.
 
 If you're new, read [Getting started](/getting-started/). Otherwise, pick what you want to do:
 
