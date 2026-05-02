@@ -1,0 +1,55 @@
+---
+title: Using with an ORM
+description: "Honker's ORM integration philosophy: keep your framework connection, call honker_* inside its transaction, and run workers against the same SQLite file."
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+If your app already manages the SQLite connection through an ORM, you don't have to hand it over to Honker. Load the `libhonker_ext` SQLite extension on each connection your ORM opens, then call the [`honker_*` SQL functions](/reference/extension/) inside your ORM's transaction — the enqueue commits atomically with your business write, same guarantee as Honker's native API.
+
+The architecture splits cleanly in half:
+
+- **Writes** go through your ORM. An `INSERT INTO orders` and a `SELECT honker_enqueue(...)` inside the same session transaction are one commit — either both land or neither does.
+- **Workers** run in a separate process and open the same `.db` file with a Honker binding (`honker.open("app.db")`, `db.queue(...).claim(...)`). Honker's commit watcher wakes workers within a millisecond or two of any commit from any connection to the file, including the ones your ORM just made.
+
+## Why a little wrapper beats a shipped helper
+
+Every language recipe has two layers: *wiring* (load the extension on the connection) and a *wrapper* (a 10-to-30-line module in your own codebase that turns `session.execute(text("SELECT honker_enqueue(:q, :p, NULL, NULL, 0, 3, NULL)"), {...})` into something that reads the way the rest of your app reads). You own the wrapper. Honker does not ship it, on purpose:
+
+- **No dependency surface.** No version-pinning against SQLAlchemy 2.x, Drizzle, Ecto, Rails majors, or anything else.
+- **Shape it to your codebase.** Match your naming, your payload types, your transaction idioms.
+- **One edit if Honker's SQL signature changes** — you update the wrapper file, not 50 call sites.
+- **No "helper package abandoned because the maintainer got bored."**
+
+The language pages are starting points. Copy, adapt, own the code.
+
+
+## Honker respects whatever PRAGMAs you set
+
+Honker doesn't require a specific journal mode, `synchronous` setting, or cache size. The wake mechanism polls `PRAGMA data_version`, which increments on every commit from any connection in any journal mode — so it works the same whether you've left SQLite's defaults alone or have tuned things for your workload.
+
+If you have no preference, `PRAGMA journal_mode=WAL` is a good default for multi-process apps (writers don't block readers). Honker's native bindings set it automatically. If your ORM already sets durability and concurrency PRAGMAs the way you want, Honker doesn't second-guess them.
+
+Bootstrap is idempotent. Safe to run on every connect during development; move to a one-time initializer or migration in production to save a few microseconds.
+
+
+## Recipes by language
+
+<CardGrid>
+  <LinkCard title="Python" href="/guides/orm/python/" description="SQLAlchemy, SQLModel typed payloads, and Django." />
+  <LinkCard title="JavaScript / TypeScript" href="/guides/orm/javascript/" description="Node, Bun, better-sqlite3, Drizzle, Kysely, and the Prisma caveat." />
+  <LinkCard title="Rust" href="/guides/orm/rust/" description="Use the native honker crate, or wire honker into an existing sqlx app." />
+  <LinkCard title="Go" href="/guides/orm/go/" description="database/sql and GORM with mattn/go-sqlite3 extension loading." />
+  <LinkCard title="Ruby" href="/guides/orm/ruby/" description="ActiveRecord and Rails sqlite3 extension loading." />
+  <LinkCard title="Elixir" href="/guides/orm/elixir/" description="Ecto and exqlite load_extensions." />
+  <LinkCard title=".NET / C#" href="/guides/orm/dotnet/" description="Use the Honker package directly or share a Microsoft.Data.Sqlite connection with framework code." />
+  <LinkCard title="C++" href="/guides/orm/cpp/" description="Use the C++ binding directly or call honker_* through a raw sqlite3 transaction." />
+</CardGrid>
+
+## Caveats that apply everywhere
+
+- **One file, one machine.** SQLite's locking is for a single host. Two servers pointing at the same `.db` over NFS will corrupt it. Shard by file, or move to Postgres + Oban/pg-boss.
+- **Workers run in their own process.** The ORM owns the write connection; workers use `honker.open("app.db")` (or the equivalent in your language) elsewhere. The commit watcher fires across processes, so the worker wakes ~1 ms after your ORM commits.
+- **Use temp files for tests, not SQLite memory databases.** Honker does not support `:memory:` or shared-memory URI databases. Shared-memory SQLite only shares across connections inside one process, so it cannot model Honker's worker/listener process boundary. A temporary file-backed `.db` is disposable and exercises the same semantics as production.
+- **Bootstrap is idempotent** but still work SQLite has to do. Run it once in an initializer or migration; drop it from the connect hook in production.
+- **Your PRAGMAs stay yours.** Honker doesn't override journal mode, `synchronous`, cache size, or busy timeout. If you want WAL for multi-process concurrency, set it yourself; Honker's own bindings do that by default, but when the ORM owns the connection, the ORM (or you) picks.

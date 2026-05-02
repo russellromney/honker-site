@@ -1,0 +1,129 @@
+---
+title: Go ORM integration
+description: Use Honker from database/sql and GORM by registering a sqlite3 driver with the Honker extension loaded.
+---
+
+Go apps can load Honker once through a `mattn/go-sqlite3` driver variant. The same small wrapper can accept `*sql.DB`, `*sql.Tx`, or `*sql.Conn`, so transactional call sites stay honest.
+
+## Go (`database/sql` + GORM)
+
+`mattn/go-sqlite3` has a declarative `Extensions` field on the driver. Register a driver variant once, then open connections through it. Extension loading is on by default; the opt-out build tag is `sqlite_omit_load_extension`, don't set it.
+
+### Wiring
+
+```go
+import (
+    "database/sql"
+    sqlite3 "github.com/mattn/go-sqlite3"
+)
+
+func init() {
+    sql.Register("sqlite3_honker", &sqlite3.SQLiteDriver{
+        Extensions: []string{"/path/to/libhonker_ext"},
+    })
+}
+
+db, _ := sql.Open("sqlite3_honker", "file:app.db")
+db.Exec("SELECT honker_bootstrap()")
+```
+
+GORM wraps `database/sql` — feed it the registered driver name:
+
+```go
+import (
+    "gorm.io/driver/sqlite"
+    "gorm.io/gorm"
+)
+
+db, _ := gorm.Open(
+    sqlite.Dialector{DriverName: "sqlite3_honker", DSN: "file:app.db"},
+    &gorm.Config{},
+)
+```
+
+### Wrapper
+
+An interface wide enough to accept `*sql.DB`, `*sql.Tx`, or `*sql.Conn` lets one helper serve transactional and non-transactional call sites:
+
+```go
+// yourapp/honker/honker.go
+package honker
+
+import (
+    "database/sql"
+    "encoding/json"
+)
+
+// DB is satisfied by *sql.DB, *sql.Tx, and *sql.Conn.
+type DB interface {
+    QueryRow(query string, args ...any) *sql.Row
+    Exec(query string, args ...any) (sql.Result, error)
+}
+
+type EnqueueOpts struct {
+    Delay    *int
+    Priority int
+}
+
+type Queue struct {
+    Name        string
+    MaxAttempts int
+}
+
+func (q *Queue) Enqueue(db DB, payload any, opts EnqueueOpts) (int64, error) {
+    p, err := json.Marshal(payload)
+    if err != nil {
+        return 0, err
+    }
+    maxAttempts := q.MaxAttempts
+    if maxAttempts == 0 {
+        maxAttempts = 3
+    }
+    var id int64
+    err = db.QueryRow(
+        "SELECT honker_enqueue(?, ?, NULL, ?, ?, ?, NULL)",
+        q.Name, string(p), opts.Delay, opts.Priority, maxAttempts,
+    ).Scan(&id)
+    return id, err
+}
+
+func Notify(db DB, channel string, payload any) error {
+    var body any
+    if payload != nil {
+        b, err := json.Marshal(payload)
+        if err != nil {
+            return err
+        }
+        body = string(b)
+    }
+    _, err := db.Exec("SELECT notify(?, ?)", channel, body)
+    return err
+}
+```
+
+### Usage
+
+`*sql.Tx` satisfies the `DB` interface, so the wrapper is transaction-aware with no special method:
+
+```go
+import "yourapp/honker"
+
+var emails = &honker.Queue{Name: "emails"}
+
+tx, _ := db.Begin()
+tx.Exec("INSERT INTO orders (user_id) VALUES (?)", 42)
+emails.Enqueue(tx, map[string]any{"to": "alice@example.com"}, honker.EnqueueOpts{})
+honker.Notify(tx, "orders", map[string]any{"id": 42})
+tx.Commit()
+```
+
+For GORM, reach through to the raw `*sql.Tx` inside `db.Transaction`:
+
+```go
+db.Transaction(func(tx *gorm.DB) error {
+    if err := tx.Create(&order).Error; err != nil { return err }
+    sqlTx := tx.Statement.ConnPool.(*sql.Tx)
+    _, err := emails.Enqueue(sqlTx, EmailJob{To: "alice@example.com"}, honker.EnqueueOpts{})
+    return err
+})
+```

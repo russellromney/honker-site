@@ -1,0 +1,69 @@
+---
+title: Ruby ORM integration
+description: Use Honker from ActiveRecord and Rails by loading the SQLite extension and wrapping honker_* SQL calls.
+---
+
+Rails and ActiveRecord can load SQLite extensions through the sqlite3 gem configuration. Once loaded, Honker calls are ordinary SQL inside `ActiveRecord::Base.transaction`.
+
+## ActiveRecord (Rails)
+
+As of the `sqlite3` gem 2.4+ and [Rails PR #53827](https://github.com/rails/rails/pull/53827), extensions are declared in `config/database.yml`:
+
+### Wiring
+
+```yaml
+default: &default
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+  extensions:
+    - /path/to/libhonker_ext
+
+development:
+  <<: *default
+  database: storage/app.db
+```
+
+Run `SELECT honker_bootstrap()` once from an initializer or migration:
+
+```ruby
+# config/initializers/honker.rb
+Rails.application.config.after_initialize do
+  ActiveRecord::Base.connection.execute("SELECT honker_bootstrap()")
+end
+```
+
+### Wrapper
+
+```ruby
+# app/lib/honker.rb
+module Honker
+  def self.enqueue(queue, payload, delay: nil, priority: 0, max_attempts: 3)
+    sql = ActiveRecord::Base.sanitize_sql_array([
+      "SELECT honker_enqueue(?, ?, NULL, ?, ?, ?, NULL) AS id",
+      queue, payload.to_json, delay, priority, max_attempts
+    ])
+    ActiveRecord::Base.connection.select_value(sql)
+  end
+
+  def self.notify(channel, payload = nil)
+    sql = ActiveRecord::Base.sanitize_sql_array([
+      "SELECT notify(?, ?)",
+      channel, payload ? payload.to_json : nil
+    ])
+    ActiveRecord::Base.connection.execute(sql)
+  end
+end
+```
+
+### Usage
+
+```ruby
+ActiveRecord::Base.transaction do
+  Order.create!(user_id: 42)
+  Honker.enqueue("emails", { to: "alice@example.com" })
+  Honker.notify("orders", { id: 42 })
+end
+```
+
+Workers run as a separate process using the [`honker` Ruby gem](https://rubygems.org/gems/honker).

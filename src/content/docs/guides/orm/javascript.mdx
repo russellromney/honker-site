@@ -1,0 +1,233 @@
+---
+title: JavaScript and TypeScript ORM integration
+description: "Use Honker from better-sqlite3, bun:sqlite, Drizzle, Kysely, or Prisma-adjacent code."
+---
+
+The JavaScript and TypeScript integrations all start with the same move: load `libhonker_ext` on the underlying SQLite handle, then wrap the `honker_*` SQL calls in a small helper that matches your app's style.
+
+## better-sqlite3 (Node / Bun)
+
+The same recipe works for `bun:sqlite` — both expose `db.loadExtension(path)` identically.
+
+### Wiring
+
+```js
+const Database = require('better-sqlite3');
+// or: import { Database } from 'bun:sqlite';
+
+const db = new Database('app.db');
+db.loadExtension('/path/to/libhonker_ext');
+db.prepare('SELECT honker_bootstrap()').run();
+```
+
+### Wrapper
+
+```ts
+// yourapp/honker-ext.ts
+import type Database from 'better-sqlite3';
+// import type { Database } from 'bun:sqlite';
+
+export class Queue<T> {
+  constructor(
+    private readonly db: Database.Database,
+    public readonly name: string,
+    private readonly maxAttempts: number = 3,
+  ) {}
+
+  enqueue(
+    payload: T,
+    opts: { delay?: number; priority?: number } = {},
+  ): number {
+    const row = this.db.prepare(
+      "SELECT honker_enqueue(?, ?, NULL, ?, ?, ?, NULL) AS id"
+    ).get(
+      this.name,
+      JSON.stringify(payload),
+      opts.delay ?? null,
+      opts.priority ?? 0,
+      this.maxAttempts,
+    ) as { id: number };
+    return row.id;
+  }
+}
+
+export function notify(
+  db: Database.Database,
+  channel: string,
+  payload: unknown = null,
+): void {
+  db.prepare('SELECT notify(?, ?)').run(
+    channel,
+    payload === null ? null : JSON.stringify(payload),
+  );
+}
+```
+
+### Usage
+
+```ts
+interface EmailJob { to: string; subject: string }
+
+const emails = new Queue<EmailJob>(db, 'emails');
+
+const createOrder = db.transaction((userId: number, email: EmailJob) => {
+  db.prepare('INSERT INTO orders (user_id) VALUES (?)').run(userId);
+  emails.enqueue(email);
+});
+createOrder(42, { to: 'alice@example.com', subject: 'Hi' });
+```
+
+
+## Drizzle ORM
+
+Drizzle's SQLite driver sits on top of `better-sqlite3`, so you reach through to the underlying connection to load the extension.
+
+### Wiring
+
+```ts
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+
+const sqlite = new Database('app.db');
+sqlite.loadExtension('/path/to/libhonker_ext');
+sqlite.prepare('SELECT honker_bootstrap()').run();
+
+export const db = drizzle(sqlite);
+```
+
+### Wrapper
+
+```ts
+// yourapp/honker-ext.ts
+import { sql } from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+
+export class Queue<T> {
+  constructor(
+    public readonly name: string,
+    private readonly maxAttempts: number = 3,
+  ) {}
+
+  enqueue(
+    db: BetterSQLite3Database,
+    payload: T,
+    opts: { delay?: number; priority?: number } = {},
+  ): number {
+    const row = db.get<{ id: number }>(sql`
+      SELECT honker_enqueue(
+        ${this.name},
+        ${JSON.stringify(payload)},
+        NULL,
+        ${opts.delay ?? null},
+        ${opts.priority ?? 0},
+        ${this.maxAttempts},
+        NULL
+      ) AS id
+    `);
+    return row!.id;
+  }
+}
+
+export function notify(
+  db: BetterSQLite3Database,
+  channel: string,
+  payload: unknown = null,
+): void {
+  db.run(sql`
+    SELECT notify(${channel}, ${payload === null ? null : JSON.stringify(payload)})
+  `);
+}
+```
+
+### Usage
+
+```ts
+import { Queue, notify } from './honker-ext';
+
+interface EmailJob { to: string; subject: string }
+
+const emails = new Queue<EmailJob>('emails');
+
+db.transaction((tx) => {
+  tx.insert(orders).values({ userId: 42 }).run();
+  emails.enqueue(tx, { to: 'alice@example.com', subject: 'Hi' });
+  notify(tx, 'orders', { id: 42 });
+});
+```
+
+
+## Kysely
+
+Kysely wraps `better-sqlite3` the same way Drizzle does.
+
+### Wiring
+
+```ts
+import Database from 'better-sqlite3';
+import { Kysely, SqliteDialect } from 'kysely';
+
+const sqlite = new Database('app.db');
+sqlite.loadExtension('/path/to/libhonker_ext');
+sqlite.prepare('SELECT honker_bootstrap()').run();
+
+export const db = new Kysely<DB>({ dialect: new SqliteDialect({ database: sqlite }) });
+```
+
+### Wrapper
+
+```ts
+// yourapp/honker-ext.ts
+import { sql, Kysely, Transaction } from 'kysely';
+import type { DB } from './schema';
+
+type Executor = Kysely<DB> | Transaction<DB>;
+
+export class Queue<T> {
+  constructor(
+    public readonly name: string,
+    private readonly maxAttempts: number = 3,
+  ) {}
+
+  async enqueue(
+    db: Executor,
+    payload: T,
+    opts: { delay?: number; priority?: number } = {},
+  ): Promise<number> {
+    const { rows } = await sql<{ id: number }>`
+      SELECT honker_enqueue(
+        ${this.name},
+        ${JSON.stringify(payload)},
+        NULL,
+        ${opts.delay ?? null},
+        ${opts.priority ?? 0},
+        ${this.maxAttempts},
+        NULL
+      ) AS id
+    `.execute(db);
+    return rows[0].id;
+  }
+}
+```
+
+### Usage
+
+```ts
+const emails = new Queue<EmailJob>('emails');
+
+await db.transaction().execute(async (tx) => {
+  await tx.insertInto('orders').values({ user_id: 42 }).execute();
+  await emails.enqueue(tx, { to: 'alice@example.com', subject: 'Hi' });
+});
+```
+
+
+## Prisma
+
+Prisma **currently can't load SQLite extensions.** Its SQLite build ships without `SQLITE_ENABLE_LOAD_EXTENSION` and its query engine doesn't expose the underlying connection. [Feature request #20271](https://github.com/prisma/prisma/issues/20271) tracks the ask.
+
+Two ways forward:
+
+1. **Open a separate Honker connection on the same file.** Prisma owns its connection; you open a second one via `better-sqlite3` for the `honker_*` calls. Simple, but you lose atomicity between the business write and the enqueue — at that point Honker is *alongside* Prisma, not *inside* it.
+2. **Move the affected writes off Prisma.** Wrap the writes that need the atomic enqueue in a `better-sqlite3` or Drizzle transaction (see those sections above). Keep Prisma for everything else.
+
+No great answer until Prisma ships extension support. If/when they do, this section will shorten.
