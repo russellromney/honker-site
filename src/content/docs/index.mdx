@@ -269,6 +269,8 @@ Idle cost is that one lightweight SELECT per millisecond per database — no pag
 
 The queue, stream, and pub/sub primitives are all INSERTs into tables managed by the extension. Calling `queue.enqueue(payload, tx=tx)` inside your business transaction means the job row is ACID with the `INSERT INTO orders` that preceded it. Rollback drops the job along with everything else.
 
+Honker intentionally does not support SQLite in-memory database filenames (`:memory:`, `file::memory:?cache=shared`, or `file:<name>?mode=memory&cache=shared`). Bare `:memory:` is per connection, and SQLite's shared-memory URI forms only share state inside one process. For production-faithful tests, use a temporary file-backed `.db`; it preserves the same locking, wake, crash/reopen, and multi-process semantics as production.
+
 ## Prior art
 
 [`pg_notify`](https://www.postgresql.org/docs/current/sql-notify.html) gives you fast cross-process triggers but no retry or visibility. [Huey](https://github.com/coleifer/huey) is the SQLite-backed Python task queue honker draws the most from. [pg-boss](https://github.com/timgit/pg-boss) and [Oban](https://github.com/sorentwo/oban) are the Postgres-side gold standards. If you already run Postgres, use those.
