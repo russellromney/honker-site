@@ -86,6 +86,8 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
+            { label: 'Binding support', slug: 'reference/bindings' },
+            { label: 'Benchmarks', slug: 'reference/benchmarks' },
             { label: 'SQL functions (extension)', slug: 'reference/extension' },
           ],
         },
