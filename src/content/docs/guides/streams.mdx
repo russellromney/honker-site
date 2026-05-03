@@ -91,6 +91,25 @@ s.publish({ id: 42, amount: 9900 });
 Honker.Stream.publish(db, "orders", %{id: 42, amount: 9900})
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto s = db.stream("orders");
+
+    s.publish(R"({"id":42,"amount":9900})");
+
+    honker::Transaction tx{db.raw()};
+    sqlite3_exec(tx.raw(),
+        "INSERT INTO orders (id, amount) VALUES (42, 9900)",
+        nullptr, nullptr, nullptr);
+    s.publish_tx(tx, R"({"id":42,"amount":9900})");
+    tx.commit();
+}
+```
+  </TabItem>
   <TabItem label="SQL (extension)">
 ```sql
 .load ./libhonker_ext
@@ -188,6 +207,26 @@ loop = fn loop ->
   end
 end
 loop.(loop)
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <chrono>
+#include <thread>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto s = db.stream("orders");
+    auto sub = s.subscribe("email-worker", 1000, std::chrono::milliseconds(100));
+
+    for (;;) {
+        if (auto event = sub.next()) {
+            send_order_email(event->payload());
+        }
+    }
+}
 ```
   </TabItem>
   <TabItem label="SQL (extension)">

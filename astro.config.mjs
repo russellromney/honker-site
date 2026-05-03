@@ -67,7 +67,20 @@ export default defineConfig({
             { label: 'Streams', slug: 'guides/streams' },
             { label: 'Pub/Sub', slug: 'guides/pubsub' },
             { label: 'Scheduler', slug: 'guides/scheduler' },
-            { label: 'Using with an ORM', slug: 'guides/orm' },
+            {
+              label: 'Using with an ORM',
+              items: [
+                { label: 'Overview', slug: 'guides/orm' },
+                { label: 'Python', slug: 'guides/orm/python' },
+                { label: 'JavaScript / TypeScript', slug: 'guides/orm/javascript' },
+                { label: 'Rust', slug: 'guides/orm/rust' },
+                { label: 'Go', slug: 'guides/orm/go' },
+                { label: 'Ruby', slug: 'guides/orm/ruby' },
+                { label: 'Elixir', slug: 'guides/orm/elixir' },
+                { label: '.NET / C#', slug: 'guides/orm/dotnet' },
+                { label: 'C++', slug: 'guides/orm/cpp' },
+              ],
+            },
           ],
         },
         {

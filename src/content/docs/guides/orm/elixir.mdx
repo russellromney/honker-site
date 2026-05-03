@@ -1,0 +1,78 @@
+---
+title: Elixir ORM integration
+description: Use Honker from Ecto by loading the SQLite extension with exqlite and calling honker_* inside Ecto.Multi.
+---
+
+Ecto apps can load Honker through `exqlite`'s extension configuration. Keep your business write in `Ecto.Multi`, then add Honker enqueue or notify steps in the same transaction.
+
+## Ecto
+
+### Wiring
+
+`exqlite` takes a `:load_extensions` list per Repo:
+
+```elixir
+# config/config.exs
+config :my_app, MyApp.Repo,
+  database: "app.db",
+  load_extensions: ["/path/to/libhonker_ext"]
+```
+
+Run bootstrap once at app start:
+
+```elixir
+# lib/my_app/application.ex
+def start(_type, _args) do
+  children = [MyApp.Repo, ...]
+  {:ok, pid} = Supervisor.start_link(children, strategy: :one_for_one)
+  Ecto.Adapters.SQL.query!(MyApp.Repo, "SELECT honker_bootstrap()", [])
+  {:ok, pid}
+end
+```
+
+### Wrapper
+
+```elixir
+# lib/my_app/honker.ex
+defmodule MyApp.Honker do
+  alias Ecto.Adapters.SQL
+
+  def enqueue(repo, queue, payload, opts \\ []) do
+    delay        = Keyword.get(opts, :delay)
+    priority     = Keyword.get(opts, :priority, 0)
+    max_attempts = Keyword.get(opts, :max_attempts, 3)
+
+    %{rows: [[id]]} =
+      SQL.query!(
+        repo,
+        "SELECT honker_enqueue($1, $2, NULL, $3, $4, $5, NULL)",
+        [queue, Jason.encode!(payload), delay, priority, max_attempts]
+      )
+    id
+  end
+
+  def notify(repo, channel, payload \\ nil) do
+    body = if payload, do: Jason.encode!(payload), else: nil
+    SQL.query!(repo, "SELECT notify($1, $2)", [channel, body])
+    :ok
+  end
+end
+```
+
+### Usage
+
+Inside an `Ecto.Multi` so the enqueue lands with the business write:
+
+```elixir
+Ecto.Multi.new()
+|> Ecto.Multi.insert(:order, %Order{user_id: 42})
+|> Ecto.Multi.run(:enqueue, fn repo, _ ->
+  {:ok, MyApp.Honker.enqueue(repo, "emails", %{to: "alice@example.com"})}
+end)
+|> Ecto.Multi.run(:notify, fn repo, _ ->
+  {:ok, MyApp.Honker.notify(repo, "orders", %{id: 42})}
+end)
+|> MyApp.Repo.transaction()
+```
+
+Workers run as a separate OTP application using the [`honker` Hex package](https://hex.pm/packages/honker).

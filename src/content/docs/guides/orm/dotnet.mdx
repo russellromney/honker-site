@@ -1,0 +1,67 @@
+---
+title: .NET and C# ORM integration
+description: "Use the Honker .NET package directly, or share Microsoft.Data.Sqlite transactions with framework code."
+---
+
+For .NET apps, the native `Honker` package is usually the integration. It wraps `Microsoft.Data.Sqlite`, loads the Honker extension, bootstraps the schema, and exposes the raw connection when framework-owned code needs to share the same SQLite handle.
+
+## Use the Honker package directly
+
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var emails = db.Queue("emails");
+
+emails.Enqueue(new { to = "alice@example.com" });
+```
+
+## Transactional business write plus enqueue
+
+When your app code can use Honker's transaction wrapper, keep the business write and enqueue in the same transaction:
+
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var emails = db.Queue("emails");
+
+using var tx = db.BeginTransaction();
+tx.Execute(
+    "INSERT INTO orders (id, total, customer_id) VALUES (@p0, @p1, @p2)",
+    42, 9900, "alice");
+emails.Enqueue(
+    new { order_id = 42, email_type = "confirmation" },
+    transaction: tx);
+tx.Notify("orders", new { id = 42 });
+tx.Commit();
+```
+
+Workers run elsewhere with the same `Database.Open("app.db")` call and claim jobs from the shared file.
+
+## Sharing with framework-owned SQLite code
+
+If a framework or data-access layer owns the SQL shape, use `db.RawConnection` for code that needs the underlying `SqliteConnection`. The important rule is the same as every ORM recipe: the `INSERT` and `SELECT honker_enqueue(...)` must execute on the same open SQLite transaction.
+
+```csharp
+using Microsoft.Data.Sqlite;
+using System.Text.Json;
+using Honker;
+
+using var db = Database.Open("app.db");
+using var tx = db.BeginTransaction();
+
+tx.Execute(
+    "INSERT INTO orders (id, total, customer_id) VALUES (@p0, @p1, @p2)",
+    42, 9900, "alice");
+
+tx.Query(
+    "SELECT honker_enqueue(@p0, @p1, NULL, NULL, 0, 3, NULL)",
+    "emails",
+    JsonSerializer.Serialize(new { order_id = 42 }));
+
+tx.Commit();
+```
+
+If you are using EF Core with SQLite, Honker does not ship an EF package. Keep the small wrapper in your app, and either run Honker SQL through the same `Microsoft.Data.Sqlite` connection/transaction that EF is using, or move the enqueue-critical write into a small explicit SQLite transaction like the examples above.
+

@@ -1,11 +1,11 @@
 ---
 title: Scheduler
-description: Cron-style periodic tasks with leader election and catch-up.
+description: Time-trigger scheduling with leader election, catch-up, and every-second schedules.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-The scheduler dispatches periodic jobs at cron boundaries. It doesn't run handlers itself. Instead, it enqueues into named queues that regular workers consume. This separation keeps scheduling lightweight and stops handler failures from affecting firing.
+The scheduler dispatches periodic jobs at schedule boundaries. It doesn't run handlers itself. Instead, it enqueues into named queues that regular workers consume. This separation keeps scheduling lightweight and stops handler failures from affecting firing.
 
 Registrations live in `_honker_scheduler_tasks`, which means every binding sees the same tasks. A Python process can register a schedule, and a Go worker can consume the enqueued jobs.
 
@@ -15,7 +15,7 @@ Registrations live in `_honker_scheduler_tasks`, which means every binding sees 
   <TabItem label="Python">
 ```python
 import asyncio
-from honker import Scheduler, crontab
+from honker import Scheduler, crontab, every_s
 
 scheduler = Scheduler(db)
 
@@ -30,7 +30,7 @@ scheduler.add(
 scheduler.add(
     name="heartbeat",
     queue="health",
-    schedule=crontab("*/5 * * * *"),       # every 5 minutes
+    schedule=every_s(1),                   # every second
 )
 
 # Run forever. Multiple processes can call this — only one holds
@@ -47,7 +47,7 @@ const sched = db.scheduler();
 sched.add({
   name: 'nightly-backup',
   queue: 'backups',
-  cron: '0 3 * * *',
+  schedule: '0 3 * * *',
   payload: { target: 's3' },
   expiresS: 3600,
 });
@@ -55,7 +55,7 @@ sched.add({
 sched.add({
   name: 'heartbeat',
   queue: 'health',
-  cron: '*/5 * * * *',
+  schedule: '@every 1s',
 });
 
 // Blocks; leader-elected. Cancel via AbortController.
@@ -73,7 +73,7 @@ let mut scheduler = Scheduler::new(db.clone());
 scheduler.add(SchedulerTask {
     name: "nightly-backup".into(),
     queue: "backups".into(),
-    cron: "0 3 * * *".into(),
+    schedule: "0 3 * * *".into(),
     payload: serde_json::json!({"target": "s3"}),
     priority: 0,
     expires_s: Some(3600),
@@ -93,7 +93,7 @@ sched := honker.NewScheduler(db)
 sched.Add(honker.SchedulerTask{
     Name:    "nightly-backup",
     Queue:   "backups",
-    Cron:    "0 3 * * *",
+    Schedule: "0 3 * * *",
     Payload: map[string]any{"target": "s3"},
 })
 sched.Run()   // blocks
@@ -109,7 +109,7 @@ sched = Honker::Scheduler.new(db)
 sched.add(
   name: "nightly-backup",
   queue: "backups",
-  cron: "0 3 * * *",
+  schedule: "0 3 * * *",
   payload: {target: "s3"},
   expires_s: 3600,
 )
@@ -127,7 +127,7 @@ const sched = new Scheduler(db);
 sched.add({
   name: "nightly-backup",
   queue: "backups",
-  cron: "0 3 * * *",
+  schedule: "0 3 * * *",
   payload: { target: "s3" },
   expiresS: 3600,
 });
@@ -142,7 +142,7 @@ await sched.run();
 Honker.Scheduler.add(db,
   name: "nightly-backup",
   queue: "backups",
-  cron: "0 3 * * *",
+  schedule: "0 3 * * *",
   payload: %{target: "s3"},
   expires_s: 3600
 )
@@ -150,19 +150,55 @@ Honker.Scheduler.add(db,
 Honker.Scheduler.run(db)
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <atomic>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto sched = db.scheduler();
+
+    sched.add(
+        "nightly-backup",
+        "backups",
+        "0 3 * * *",
+        R"({"target":"s3"})",
+        0,
+        3600
+    );
+
+    sched.add(
+        "heartbeat",
+        "health",
+        "@every 1s",
+        R"({"ok":true})"
+    );
+
+    std::atomic<bool> stop{false};
+    sched.run(stop, "host-a");
+}
+```
+  </TabItem>
   <TabItem label="SQL (extension)">
 ```sql
 .load ./libhonker_ext
 SELECT honker_bootstrap();
 
--- honker_scheduler_add(name, queue, cron, payload, priority, expires)
-SELECT honker_scheduler_add(
+-- Register a recurring task. `cron_expr` can be 5-field cron,
+-- 6-field cron, or `@every <n><unit>`.
+SELECT honker_scheduler_register(
   'nightly-backup', 'backups', '0 3 * * *',
   '{"target":"s3"}', 0, 3600
 );
 
--- Drive the scheduler from any loop: call tick on a 1s cadence.
-SELECT honker_scheduler_tick();
+SELECT honker_scheduler_register(
+  'heartbeat', 'health', '@every 1s',
+  '{"ok":true}', 0, NULL
+);
+
+SELECT honker_scheduler_tick(unixepoch());
 ```
   </TabItem>
 </Tabs>
@@ -177,9 +213,15 @@ This is binding-agnostic: a Python scheduler on one host and a Go scheduler on a
 
 If the scheduler was down across multiple boundaries, the next tick walks forward and fires each missed boundary. Good for low-frequency schedules like "fire once per hour for the last 6 hours." For high-frequency schedules where catch-up is unwanted, set `expires_s=` so stale jobs drop out of the claim window.
 
-## Cron syntax
+## Schedule syntax
 
-Standard 5-field Unix cron: `minute hour day-of-month month day-of-week`. Fields support:
+Honker accepts three schedule forms:
+
+- 5-field cron: `minute hour day-of-month month day-of-week`
+- 6-field cron: `second minute hour day-of-month month day-of-week`
+- `@every <n><unit>` such as `@every 1s`, `@every 5m`, `@every 2h`
+
+Cron fields support:
 
 - `*` any value
 - `N` literal value
@@ -195,4 +237,5 @@ DST is handled correctly. Spring-forward skips nonexistent local times; fall-bac
 ## Where it lives
 
 - `_honker_scheduler_tasks` has one row per registered task: `(name, queue, cron_expr, payload, priority, expires_s, next_fire_at)`.
+- `cron_expr` stores the canonical schedule expression, even for `@every ...`.
 - Scheduler state is on disk, not in any process's memory. Every binding sees the same registrations.

@@ -72,6 +72,13 @@ mix deps.get
 
 Requires Elixir 1.15+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path.
   </TabItem>
+  <TabItem label=".NET">
+```bash
+dotnet add package Honker
+```
+
+Targets `net8.0` and `net10.0`. The NuGet package bundles the native extension for `linux-x64`, `osx-x64`, `osx-arm64`, and `win-x64`. Override native loading with `OpenOptions.ExtensionPath` or `HONKER_EXTENSION_PATH` if you need an explicit path.
+  </TabItem>
   <TabItem label="C++">
 ```bash
 git clone https://github.com/russellromney/honker-cpp.git
@@ -207,6 +214,53 @@ IO.puts("hello, #{job.payload["name"]}!")
 Honker.Job.ack(db, job)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var q = db.Queue("greetings");
+
+q.Enqueue(new { name = "world" });
+
+var job = q.ClaimOne("worker-1");
+Console.WriteLine($"hello, {job!.Payload.GetProperty("name").GetString()}!");
+job.Ack();
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <iostream>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("greetings");
+
+    q.enqueue(R"({"name":"world"})");
+
+    if (auto job = q.claim_one("worker-1")) {
+        auto payload = nlohmann::json::parse(job->payload());
+        std::cout << "hello, " << payload["name"].get<std::string>() << "!\n";
+        job->ack();
+    }
+}
+```
+  </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+SELECT honker_enqueue('greetings', '{"name":"world"}',
+                      NULL, NULL, 0, 3, NULL);
+
+SELECT honker_claim_batch('greetings', 'worker-1', 1, 300);
+-- Then ack the claimed job id from the JSON result above.
+SELECT honker_ack(1, 'worker-1');
+```
+  </TabItem>
 </Tabs>
 
 ## A proper worker
@@ -316,6 +370,68 @@ end
 loop.(loop)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var q = db.Queue("emails");
+
+await foreach (var job in q.ClaimAsync("worker-1"))
+{
+    try
+    {
+        await SendEmail(job.Payload);
+        job.Ack();
+    }
+    catch (Exception e)
+    {
+        job.Retry(60, e.Message);
+    }
+}
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <chrono>
+#include <thread>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("emails");
+
+    for (;;) {
+        if (auto job = q.claim_one("worker-1")) {
+            try {
+                send_email(job->payload());
+                job->ack();
+            } catch (const std::exception& e) {
+                job->retry(60, e.what());
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
+```
+  </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+-- Claim one ready job.
+SELECT honker_claim_batch('emails', 'worker-1', 1, 300);
+
+-- On success:
+SELECT honker_ack(42, 'worker-1');
+
+-- Or on failure, schedule a retry 60 seconds out:
+SELECT honker_retry(42, 'worker-1', 60, 'smtp timeout');
+```
+  </TabItem>
 </Tabs>
 
 ## Atomic enqueue with business writes
@@ -405,6 +521,52 @@ Honker.transaction(db, fn tx ->
 end)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using (var tx = db.BeginTransaction())
+{
+    tx.Execute(
+        "INSERT INTO orders (id, total, customer_id) VALUES (@p0, @p1, @p2)",
+        42, 9900, "alice");
+    q.Enqueue(new { order_id = 42, email_type = "confirmation" }, transaction: tx);
+    tx.Commit();
+}
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto q = db.queue("emails");
+
+    honker::Transaction tx{db.raw()};
+    sqlite3_exec(
+        tx.raw(),
+        "INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice')",
+        nullptr, nullptr, nullptr
+    );
+    q.enqueue_tx(tx, R"({"order_id":42,"email_type":"confirmation"})");
+    tx.commit();
+}
+```
+  </TabItem>
+  <TabItem label="SQL">
+```sql
+.load ./libhonker_ext
+SELECT honker_bootstrap();
+
+BEGIN;
+INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice');
+SELECT honker_enqueue(
+  'emails',
+  '{"order_id":42,"email_type":"confirmation"}',
+  NULL, NULL, 0, 3, NULL
+);
+COMMIT;
+```
+  </TabItem>
 </Tabs>
 
 ## What's next
@@ -413,6 +575,6 @@ end)
 - [Tasks](/guides/tasks/) for Huey-style `@task` decorators (Python)
 - [Streams](/guides/streams/) for durable pub/sub with per-consumer offsets
 - [Pub/Sub](/guides/pubsub/) for `pg_notify`-style ephemeral signals
-- [Scheduler](/guides/scheduler/) for cron-style periodic tasks
-- [Using with an ORM](/guides/orm/) for SQLAlchemy, Django, Drizzle, sqlx, GORM, ActiveRecord, Ecto
+- [Scheduler](/guides/scheduler/) for cron and `@every` time-trigger tasks
+- [Using with an ORM](/guides/orm/) for the integration philosophy and per-language recipes for every Honker binding
 - [Extension reference](/reference/extension/) for the full `honker_*` SQL function family

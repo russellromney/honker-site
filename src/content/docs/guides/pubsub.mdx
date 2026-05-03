@@ -80,6 +80,26 @@ db.notify("orders", { id: 42, event: "placed" });
 Honker.notify(db, "orders", %{id: 42, event: "placed"})
 ```
   </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+
+    honker::Transaction tx{db.raw()};
+    sqlite3_exec(tx.raw(),
+        "INSERT INTO orders (id) VALUES (42)",
+        nullptr, nullptr, nullptr);
+    sqlite3_exec(tx.raw(),
+        "SELECT notify('orders', '{\"id\":42,\"event\":\"placed\"}')",
+        nullptr, nullptr, nullptr);
+    tx.commit();
+
+    db.notify("orders", R"({"id":42,"event":"placed"})");
+}
+```
+  </TabItem>
   <TabItem label="SQL (extension)">
 ```sql
 .load ./libhonker_ext
@@ -154,6 +174,25 @@ receive_loop = fn loop ->
   end
 end
 receive_loop.(receive_loop)
+```
+  </TabItem>
+  <TabItem label="C++">
+```cpp
+#include "honker.hpp"
+
+#include <chrono>
+#include <iostream>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto sub = db.listen("orders");
+
+    for (;;) {
+        if (auto notif = sub.recv(std::chrono::milliseconds(5000))) {
+            std::cout << notif->channel() << " " << notif->payload() << "\n";
+        }
+    }
+}
 ```
   </TabItem>
 </Tabs>

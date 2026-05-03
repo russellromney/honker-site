@@ -1,0 +1,72 @@
+---
+title: C++ ORM integration
+description: "Use the C++ binding directly, or call Honker SQL functions through a raw sqlite3 transaction."
+---
+
+For C++ apps, the `honker-cpp` binding is intentionally thin. It loads the Honker SQLite extension, gives you RAII wrappers for queues and transactions, and exposes the raw `sqlite3*` when you need to integrate with code that already owns SQL statements.
+
+## Use the C++ binding directly
+
+```cpp
+#include "honker.hpp"
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto emails = db.queue("emails");
+
+    emails.enqueue(R"({"to":"alice@example.com"})");
+}
+```
+
+## Transactional business write plus enqueue
+
+When your app can use Honker's transaction wrapper, keep the business write and enqueue on the same connection:
+
+```cpp
+#include "honker.hpp"
+#include <sqlite3.h>
+
+int main() {
+    honker::Database db{"app.db", "./libhonker_ext.dylib"};
+    auto emails = db.queue("emails");
+
+    honker::Transaction tx{db.raw()};
+    sqlite3_exec(
+        tx.raw(),
+        "INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice')",
+        nullptr, nullptr, nullptr
+    );
+    emails.enqueue_tx(tx, R"({"order_id":42,"email_type":"confirmation"})");
+    tx.commit();
+}
+```
+
+## Framework-owned sqlite3 code
+
+If another C++ data layer owns the SQL, keep Honker as a small helper over the same `sqlite3*`. The core operation is still just SQL:
+
+```cpp
+sqlite3_exec(db.raw(), "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+sqlite3_exec(
+    db.raw(),
+    "INSERT INTO orders (id, total, customer_id) VALUES (42, 9900, 'alice')",
+    nullptr, nullptr, nullptr
+);
+
+sqlite3_stmt* stmt = nullptr;
+sqlite3_prepare_v2(
+    db.raw(),
+    "SELECT honker_enqueue('emails', ?, NULL, NULL, 0, 3, NULL)",
+    -1,
+    &stmt,
+    nullptr
+);
+sqlite3_bind_text(stmt, 1, R"({"order_id":42})", -1, SQLITE_TRANSIENT);
+sqlite3_step(stmt);
+sqlite3_finalize(stmt);
+
+sqlite3_exec(db.raw(), "COMMIT", nullptr, nullptr, nullptr);
+```
+
+That is the whole integration contract: load the extension once, run your business SQL and `honker_*` SQL on the same transaction, and let workers claim from the same file.
+

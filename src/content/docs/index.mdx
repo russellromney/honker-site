@@ -1,9 +1,9 @@
 ---
 title: Honker
-description: Durable queues, streams, pub/sub, and scheduler on SQLite. One file, zero servers.
+description: Durable queues, streams, pub/sub, and time-trigger scheduling on SQLite. One file, zero servers.
 template: splash
 hero:
-  tagline: Durable queues, streams, pub/sub, and a cron scheduler — inside your SQLite file.
+  tagline: Durable queues, streams, pub/sub, and time-trigger scheduling — inside your SQLite file.
   image:
     # Starlight positions this next to the tagline + actions in the
     # hero block. Dark-mode variant could go in image.dark if we add
@@ -24,7 +24,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 honker adds Postgres-style `NOTIFY`/`LISTEN` semantics to SQLite, with a durable pub/sub, task queue, and event streams on the side, without client polling or a daemon/broker. Cross-process wake latency is ~0.7 ms p50 on an M-series laptop.
 
-In its basic form it's a plain SQLite loadable extension, so any language that can `SELECT load_extension('honker_ext')` gets the same queue, streams, and notifications on the same file. Bindings for Python, Node, Rust, Go, Ruby, Bun, and Elixir share one on-disk format.
+In its basic form it's a plain SQLite loadable extension, so any language that can `SELECT load_extension('honker_ext')` gets the same queue, streams, and notifications on the same file. Bindings for Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, and .NET / C# share one on-disk format.
 
 SQLite is backing real work now — Bluesky's PDS, Fly's LiteFS, Turso, weekend projects that somehow ended up in production. Once real work flows through a SQLite-backed app, you need a queue. The usual answer is "add Redis + Celery." That works, but introduces a second datastore with its own backup story, a dual-write problem between your business table and the queue, and the operational overhead of running a broker.
 
@@ -36,13 +36,14 @@ honker takes the approach that if SQLite is the primary datastore, the queue sho
 - Durable work queues with retries, priority, delayed jobs, expiration, and dead letters
 - Transactional outbox patterns where your business write and enqueue commit together or roll back together
 - Durable streams with per-consumer offsets
-- Crontab-style periodic tasks with a leader-elected scheduler
+- Time-trigger scheduling with a leader-elected scheduler:
+  5-field cron, 6-field cron, and `@every <n><unit>`
 - Named locks, rate limiting, and opt-in task result storage
 - Thin cross-language bindings over the same extension-owned SQLite layout
 
 ## One example
 
-Enqueue atomically with a business write, then consume. Same `.db` file, same on-disk format, seven languages.
+Enqueue atomically with a business write, then consume. Same `.db` file, same on-disk format, now including .NET / C#.
 
 <Tabs syncKey="language">
   <TabItem label="Python">
@@ -57,7 +58,7 @@ with db.transaction() as tx:
     tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99])
     q.enqueue({"to": "alice@example.com", "order_id": 42}, tx=tx)
 
-# Worker wakes on any commit to the db, no polling.
+# Worker wakes on database updates or due deadlines.
 async for job in q.claim("worker-1"):
     await send_email(job.payload)
     job.ack()
@@ -87,7 +88,7 @@ tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 99]);
 q.enqueueTx(tx, { to: 'alice@example.com', order_id: 42 });
 tx.commit();
 
-// Worker wakes on any commit to the db, no polling.
+// Worker wakes on database updates or due deadlines.
 const waker = q.claimWaker();
 while (true) {
   const job = await waker.next('worker-1');
@@ -198,6 +199,28 @@ case Honker.Queue.claim_one(q, "worker-1") do
 end
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var q = db.Queue("emails");
+
+using (var tx = db.BeginTransaction())
+{
+    tx.Execute("INSERT INTO orders (id, total) VALUES (@p0, @p1)", 42, 99);
+    q.Enqueue(new { to = "alice@example.com", order_id = 42 }, transaction: tx);
+    tx.Commit();
+}
+
+var job = q.ClaimOne("worker-1");
+if (job is not null)
+{
+    await SendEmail(job.Payload);
+    job.Ack();
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -221,7 +244,7 @@ int main() {
 }
 ```
   </TabItem>
-  <TabItem label="SQL (extension)">
+  <TabItem label="SQL">
 ```sql
 .load ./libhonker_ext
 SELECT honker_bootstrap();
@@ -247,6 +270,8 @@ Idle cost is that one lightweight SELECT per millisecond per database — no pag
 Advanced users can opt into experimental kernel filesystem-event or mmap WAL-index backends; see [Watcher backends](/reference/watcher-backends/).
 
 The queue, stream, and pub/sub primitives are all INSERTs into tables managed by the extension. Calling `queue.enqueue(payload, tx=tx)` inside your business transaction means the job row is ACID with the `INSERT INTO orders` that preceded it. Rollback drops the job along with everything else.
+
+Honker intentionally does not support SQLite in-memory database filenames (`:memory:`, `file::memory:?cache=shared`, or `file:<name>?mode=memory&cache=shared`). Bare `:memory:` is per connection, and SQLite's shared-memory URI forms only share state inside one process. For production-faithful tests, use a temporary file-backed `.db`; it preserves the same locking, wake, crash/reopen, and multi-process semantics as production.
 
 ## Prior art
 
@@ -289,6 +314,11 @@ bun add @russellthehippo/honker-bun
 ```elixir
 # mix.exs
 {:honker, "~> 0.1"}
+```
+  </TabItem>
+  <TabItem label=".NET">
+```bash
+dotnet add package Honker
 ```
   </TabItem>
   <TabItem label="C++">

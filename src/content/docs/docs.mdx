@@ -1,11 +1,14 @@
 ---
 title: Docs
-description: Guides and reference for honker — durable queues, streams, pub/sub, and cron on SQLite.
+description: Guides and reference for honker — durable queues, streams, pub/sub, and time-trigger scheduling on SQLite.
 ---
 
 import { LinkCard, CardGrid } from '@astrojs/starlight/components';
 
-honker ships as a SQLite loadable extension plus bindings for Python, Node, Rust, Go, Ruby, Bun, and Elixir. The extension defines the on-disk format; bindings are thin wrappers that share it.
+honker ships as a Rust-built SQLite loadable extension plus bindings
+for Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, and .NET / C#.
+The extension defines the on-disk format; bindings are first-class
+wrappers that live in the main repo and share the same Rust core.
 
 If you're new, read [Getting started](/getting-started/). Otherwise, pick what you want to do:
 
@@ -14,9 +17,9 @@ If you're new, read [Getting started](/getting-started/). Otherwise, pick what y
   <LinkCard title="Queues" href="/guides/queues/" description="Work queues with retries, priority, delayed jobs, dead-letter."/>
   <LinkCard title="Streams" href="/guides/streams/" description="Durable pub/sub with per-consumer offsets and resume-after-crash."/>
   <LinkCard title="Pub/Sub" href="/guides/pubsub/" description="pg_notify-style ephemeral notifications. 0.7 ms p50 wake."/>
-  <LinkCard title="Scheduler" href="/guides/scheduler/" description="Crontab-style periodic tasks with leader election."/>
+  <LinkCard title="Scheduler" href="/guides/scheduler/" description="Time-trigger scheduling with cron or @every expressions."/>
   <LinkCard title="Tasks (decorators)" href="/guides/tasks/" description="Huey-style @task decorators. Enqueue by calling the function."/>
-  <LinkCard title="Using with an ORM" href="/guides/orm/" description="SQLAlchemy, SQLModel, Django, Drizzle, sqlx, GORM, ActiveRecord, Ecto. Keep the ORM connection; call honker_* inside its transaction."/>
+  <LinkCard title="Using with an ORM" href="/guides/orm/" description="The non-framework philosophy plus per-language recipes for every Honker binding."/>
   <LinkCard title="SQL function reference" href="/reference/extension/" description="Every honker_* SQL function the extension installs."/>
   <LinkCard title="Roadmap" href="/roadmap/" description="What stays in Honker, and which adjacent SQLite primitives may split out later."/>
 </CardGrid>

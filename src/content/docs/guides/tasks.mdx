@@ -81,14 +81,18 @@ asyncio.run(db.run_workers(concurrency=4))
 ## Periodic tasks
 
 ```python
-from honker import crontab
+from honker import crontab, every_s
 
 @q.periodic_task(crontab("0 3 * * *"))
 def nightly_backup():
     ...
+
+@q.periodic_task(every_s(1))
+def heartbeat():
+    ...
 ```
 
-Registers the function in the task registry AND in the scheduler. The scheduler enqueues a fixed payload (no args) on each cron boundary; the worker picks it up and dispatches through the same decorator-task path.
+Registers the function in the task registry AND in the scheduler. The scheduler enqueues a fixed payload (no args) on each schedule boundary; the worker picks it up and dispatches through the same decorator-task path.
 
 Same default-on-none / explicit-name pattern: `@q.periodic_task(crontab, name="nightly")` to stabilize the name.
 
