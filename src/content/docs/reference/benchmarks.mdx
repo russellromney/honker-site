@@ -1,0 +1,59 @@
+---
+title: Benchmarks
+description: Baseline Honker performance numbers and how to read them.
+---
+
+Benchmarks are promises about shape, not universal numbers. Hardware,
+filesystem, SQLite version, Python version, and fsync settings matter.
+Use these as a sanity check for "same order of magnitude."
+
+Baseline: Apple Silicon M-series laptop, release build, WAL,
+`synchronous=NORMAL`, `busy_timeout=5000`, April 2026.
+
+## Queue
+
+| Operation | Baseline |
+|---|---:|
+| Enqueue, one job per transaction | 6,000 jobs/s |
+| Enqueue, 100 jobs per transaction | 110,000 jobs/s |
+| Claim + ack, one job | 3,700 jobs/s |
+| Claim batch + ack batch, batch 32 | 60,000 jobs/s |
+| Claim batch + ack batch, batch 128 | 80,000 jobs/s |
+
+Single-job paths pay per-transaction fixed cost. Batch paths amortize
+SQLite writes and are the right shape for high-volume workers.
+
+## Streams And Wake
+
+| Operation | Baseline |
+|---|---:|
+| Stream publish, one event per transaction | 5,800 events/s |
+| Stream replay from reader pool | 1,000,000 events/s |
+| Live stream end-to-end | p50 0.23 ms, p99 7 ms |
+| Cross-process notify/listen wake | about 0.7 ms p50 on this machine |
+
+The wake path is one `PRAGMA data_version` read every 1 ms per open
+`Database`, fan-out to N subscribers, then a normal indexed `SELECT`.
+Subscriber count does not create more poll threads.
+
+## Idle Cost
+
+The current update watcher uses `PRAGMA data_version`. The microbench
+measures roughly 3.5 us per poll on reference hardware. At 1 kHz that is
+about 3.5 ms of CPU per second per open database handle, before any real
+work happens. That is small enough to keep the boring implementation.
+
+There is a faster experimental shm reader in `bench/wal_index_methods`,
+but it is not the default. It is kept as research until a real profile
+says the current watcher matters.
+
+## How To Refresh
+
+```bash
+uv run python bench/honker_bench.py --n 5000
+uv run python bench/stream_bench.py --n 5000
+cd bench/wal_index_methods && cargo run --release
+```
+
+When numbers change materially, update `bench/README.md` first, then
+copy the user-facing summary here.

@@ -1,0 +1,68 @@
+---
+title: Elixir
+description: Use Honker from Elixir, including Ecto integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```elixir
+def deps do
+  [
+    {:honker, "~> 0.1"}
+  ]
+end
+```
+
+Elixir uses `exqlite` and the compiled Honker extension.
+
+## Open
+
+```elixir
+{:ok, db} =
+  Honker.open("app.db",
+    extension_path: "./libhonker_ext.so",
+    watcher_backend: "shm"
+  )
+```
+
+## Queue
+
+```elixir
+q = Honker.queue(db, "emails")
+{:ok, _id} = Honker.Queue.enqueue(q, %{to: "alice@example.com"})
+
+case Honker.Queue.claim_one(q, "worker-1") do
+  {:ok, job} -> Honker.Job.ack(db, job)
+  :none -> :ok
+end
+```
+
+## Transactional Outbox
+
+```elixir
+outbox =
+  Honker.outbox(db, "email", fn payload ->
+    MyApp.Email.deliver(payload)
+  end)
+
+Honker.transaction(db, fn tx ->
+  Honker.execute(tx, "INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900])
+  Honker.Outbox.enqueue(outbox, %{order_id: 42}, tx: tx)
+end)
+
+Honker.Outbox.run_once(outbox, "email-worker")
+```
+
+## ORM Section
+
+For Ecto, load the Honker extension through the SQLite adapter/exqlite
+connection setup. Keep business writes in `Ecto.Multi`, then add a step that
+executes `honker_enqueue` or `honker_notify` on the same transaction.
+
+See the full [Elixir ORM recipe](/guides/orm/elixir/) for Ecto.Multi examples.
+
+## Testing
+
+Use `System.tmp_dir!()` plus a real `.db` file and start worker processes with
+the same extension path. Avoid in-memory SQLite for anything that needs worker
+or watcher fidelity.

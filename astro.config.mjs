@@ -85,8 +85,25 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Languages',
+          items: [
+            { label: 'Overview', slug: 'languages' },
+            { label: 'Python', slug: 'languages/python' },
+            { label: 'Node', slug: 'languages/node' },
+            { label: 'Rust', slug: 'languages/rust' },
+            { label: 'Go', slug: 'languages/go' },
+            { label: 'Ruby', slug: 'languages/ruby' },
+            { label: 'Bun', slug: 'languages/bun' },
+            { label: 'Elixir', slug: 'languages/elixir' },
+            { label: '.NET / C#', slug: 'languages/dotnet' },
+            { label: 'C++', slug: 'languages/cpp' },
+          ],
+        },
+        {
           label: 'Reference',
           items: [
+            { label: 'Binding support', slug: 'reference/bindings' },
+            { label: 'Benchmarks', slug: 'reference/benchmarks' },
             { label: 'SQL functions (extension)', slug: 'reference/extension' },
             { label: 'Watcher backends', slug: 'reference/watcher-backends' },
           ],
