@@ -1,0 +1,51 @@
+---
+title: Binding support
+description: What each Honker binding supports and what CI proves.
+---
+
+Honker's core is Rust. The extension owns the SQLite schema and SQL
+functions. Bindings are thin language wrappers over that same shape.
+
+"Yes" means the feature has a typed binding and runs in root CI. "SQL"
+means the extension feature is available through raw SQL, but the
+language wrapper does not expose the nice API yet. For install and ORM
+details, see the [language guides](/languages/).
+
+| Binding | Package proof | Queue | Streams | Notify/listen | Scheduler | Outbox | Watcher backends |
+|---|---:|---:|---:|---:|---:|---:|---|
+| SQLite extension | load smoke | SQL | SQL | notify SQL only | SQL | SQL | host language must watch/read |
+| Python `honker` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Node `@russellthehippo/honker-node` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
+| .NET `Honker` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Rust `honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Go | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+| Bun `@russellthehippo/honker-bun` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
+| C++ | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Ruby `honker` | yes | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+| Elixir `honker` | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+
+## What CI Proves
+
+- PR CI runs Rust core/extension on Linux, macOS, and Windows.
+- PR CI runs Python on Linux, macOS, and Windows.
+- PR CI runs Node on Linux, macOS, and Windows.
+- PR CI runs .NET on Linux, macOS, and Windows.
+- The aggregate Linux binding smoke runs Rust wrapper, Go, .NET
+  Python interop, C++, Bun, Ruby, Elixir, and Ruby/Python interop.
+- The packaged-install proof workflow builds and installs Python,
+  Node, Ruby, and .NET packages into clean throwaway consumers.
+- Watcher-backend queue proofs run cross-process for every binding so
+  extension loading, database reopen, SHM reopen, wake delivery, and
+  no-fallback behavior are exercised outside a single runtime process.
+
+## What Is Not Proven Yet
+
+- Published registry installs after release. The proof workflow uses
+  locally-built artifacts, which catches packaging shape but not registry
+  permissions or CDN weirdness.
+- Every possible cross-language pair. CI proves representative pairs
+  and shared table behavior. It does not run N x N interop.
+- Long soak on every OS. The scary nightly workflow soaks Linux; PR CI
+  stays shorter.
+- Go, Ruby, and Elixir expose notifications and update-waiting without
+  the same high-level async listener shape as Python/Node/.NET/Rust/Bun/C++.

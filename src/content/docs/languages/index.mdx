@@ -1,0 +1,36 @@
+---
+title: Language guides
+description: Binding-specific Honker docs for install, queues, outbox, watcher backends, testing, and ORM integration.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+Every Honker binding is a first-class binding over the same SQLite layout.
+Pick your runtime for package names, extension loading notes, watcher-backend
+selection, transactional outbox usage, and ORM integration.
+
+<CardGrid>
+  <LinkCard title="Python" href="/languages/python/" description="Native wheel, SQLAlchemy/Django notes, task helpers, and outbox workers." />
+  <LinkCard title="Node" href="/languages/node/" description="Native npm package, better-sqlite3/Drizzle/Kysely notes, and watcher backend selection." />
+  <LinkCard title="Rust" href="/languages/rust/" description="The native honker crate, sqlx integration, and feature-gated watcher backends." />
+  <LinkCard title="Go" href="/languages/go/" description="database/sql, GORM, extension loading, and subprocess-friendly queue workers." />
+  <LinkCard title="Ruby" href="/languages/ruby/" description="Ruby gem, Rails/ActiveRecord notes, extension loading, and outbox workers." />
+  <LinkCard title="Bun" href="/languages/bun/" description="bun:sqlite binding, TypeScript API, Drizzle notes, and watcher backends." />
+  <LinkCard title="Elixir" href="/languages/elixir/" description="exqlite/Ecto integration, process workers, scheduler, and outbox delivery." />
+  <LinkCard title=".NET / C#" href="/languages/dotnet/" description="NuGet package, Microsoft.Data.Sqlite, EF Core notes, and async listeners." />
+  <LinkCard title="C++" href="/languages/cpp/" description="Header API, raw sqlite3 integration, RAII transactions, and C++ ORM notes." />
+</CardGrid>
+
+## One Contract
+
+All bindings share these rules:
+
+- Use a file-backed SQLite database, not `:memory:`, when testing worker or listener behavior.
+- Keep business writes and Honker calls in the same transaction when you need atomic enqueue, publish, notify, or outbox behavior.
+- Use a separate worker process for production queue and outbox delivery.
+- If your ORM owns the connection, load the Honker extension there and call `honker_*` SQL functions inside the ORM transaction.
+- `watcher_backend` / `watcherBackend` accepts `poll`, `polling`, `kernel`, `kernel-watcher`, `shm`, and `shm-fast-path`. Explicit experimental backend requests fail rather than silently falling back.
+
+The detailed ORM recipes still live under [Using with an ORM](/guides/orm/).
+These language pages include the short version so each binding doc stands on
+its own.
