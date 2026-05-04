@@ -356,6 +356,34 @@ async for job in q.claim("worker-1"):
 
 Other bindings expose a plain `job.heartbeat(extend_s)` that you call on a timer.
 
+## Cancel and inspect a job by id
+
+```python
+q = db.queue("emails")
+job_id = q.enqueue({"to": "alice@example.com"})
+
+# Read the row without touching its state.
+row = q.get_job(job_id)
+# {"id": 42, "queue": "emails", "state": "pending", "payload": "...", ...}
+
+# Delete a pending or in-flight job.
+q.cancel(job_id)              # True — row deleted
+q.cancel(job_id)              # False — idempotent, already gone
+```
+
+```js
+const q = db.queue("emails");
+const id = q.enqueue({ to: "alice@example.com" });
+q.getJob(id);                 // row object or null
+q.cancel(id);                 // true / false (idempotent)
+```
+
+`cancel` of a processing row invalidates the worker's claim — its next `ack()` returns `false`, same shape as an expired claim. It does **not** interrupt a worker that's currently running the handler. If you need the handler to actually stop, build that signal in your app (check a flag, etc.); honker doesn't propagate cancellation to running handlers.
+
+`get_job` only returns rows from `_honker_live` (pending or processing). For dead jobs query `_honker_dead` directly.
+
+Both methods are available in every binding (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++).
+
 ## Retry, fail, dead-letter
 
 - `job.retry(delay_s, error)` puts the row back in `_honker_live` with a new `run_at`. After `max_attempts` retries, it auto-moves to `_honker_dead`.

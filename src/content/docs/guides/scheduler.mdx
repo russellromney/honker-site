@@ -203,6 +203,63 @@ SELECT honker_scheduler_tick(unixepoch());
   </TabItem>
 </Tabs>
 
+## Lifecycle: pause, resume, list, update
+
+Each schedule is one addressable row in `_honker_scheduler_tasks`. You can mutate it from any process or binding without touching the table directly.
+
+```python
+sched = honker.Scheduler(db)
+
+sched.add(name="recap", queue="emails", schedule=crontab("0 9 * * 1"),
+          payload={"team": "premier-league"})
+
+# Stop firing without losing the row.
+sched.pause("recap")
+
+# What's scheduled? Each row has cron, payload, priority, enabled, next_fire_at.
+for row in sched.list():
+    print(row["name"], row["enabled"], row["next_fire_at"])
+
+# Mutate fields in place. Cron change recomputes next_fire_at from now.
+sched.update("recap", schedule=crontab("0 9 * * 2"))   # change to Tuesday
+sched.update("recap", payload={"team": "championship"})
+
+sched.resume("recap")
+
+# Or remove entirely.
+sched.remove("recap")
+```
+
+```js
+const sched = new honker.Scheduler(db);
+
+sched.add({ name: "recap", queue: "emails", cron: "0 9 * * 1",
+            payload: { team: "premier-league" } });
+
+sched.pause("recap");
+sched.list();                            // every schedule with state
+sched.update("recap", { cron: "0 9 * * 2" });
+sched.resume("recap");
+sched.remove("recap");
+```
+
+`pause` / `resume` are idempotent — calling pause on an already-paused schedule returns `false`. `update` with no field args is a no-op (returns `false`). All methods are available in every binding (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++).
+
+### Bounded recurrence ("run N times then stop")
+
+Honker doesn't ship a `max_runs` column — the question of "what counts as N" (fires, claims, successful completions) is application logic. The simple pattern: keep your own counter and `unschedule` when it hits the bound.
+
+```python
+@db.queue("snapshots").task()
+def snapshot():
+    take_snapshot()
+    count = increment_counter()  # your own table
+    if count >= 10:
+        db.scheduler.remove("snapshot")
+```
+
+This matches what pg-boss does on the Postgres side.
+
 ## Leader election
 
 The scheduler acquires an advisory lock named `honker-scheduler` with a 60-second TTL. A periodic heartbeat extends the TTL during long idle waits. If the leader crashes, the TTL elapses and a standby takes over. Two schedulers running at the same time never double-fire because the lock is the sole gate, backed by `BEGIN IMMEDIATE` serialization.
