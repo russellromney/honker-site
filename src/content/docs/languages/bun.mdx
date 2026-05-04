@@ -1,0 +1,68 @@
+---
+title: Bun
+description: Use Honker from Bun, including bun:sqlite integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+bun add @russellthehippo/honker-bun
+```
+
+Bun loads the Honker SQLite extension through `bun:sqlite`, so keep
+`libhonker_ext.{so,dylib,dll}` next to your app or configure an absolute path.
+
+## Open
+
+```ts
+import { open } from "@russellthehippo/honker-bun";
+
+const db = open("app.db", "./libhonker_ext.dylib", { watcherBackend: "shm" });
+```
+
+## Queue
+
+```ts
+const q = db.queue("emails");
+q.enqueue({ to: "alice@example.com" });
+
+const job = q.claimOne("worker-1");
+if (job) {
+  await sendEmail(job.payload);
+  job.ack();
+}
+```
+
+## Transactional Outbox
+
+```ts
+const outbox = db.outbox("email", async (payload) => sendEmail(payload));
+
+const tx = db.transaction();
+try {
+  tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900]);
+  outbox.enqueueTx(tx, { orderId: 42 });
+  tx.commit();
+} catch (error) {
+  tx.rollback();
+  throw error;
+}
+
+await outbox.runWorker("email-worker");
+```
+
+## ORM Section
+
+For Drizzle or other TypeScript layers over `bun:sqlite`, load the extension on
+the same `Database` connection and execute Honker SQL inside the same
+transaction as your business write. If an ORM hides the underlying connection,
+move enqueue-critical writes into an explicit `bun:sqlite` transaction.
+
+See the [JavaScript / TypeScript ORM recipe](/guides/orm/javascript/) for the
+shared Node/Bun approach.
+
+## Testing
+
+Use file-backed temp databases and `Bun.spawn` workers for queue/outbox
+watcher proofs. That catches extension load and wake behavior outside one Bun
+process.

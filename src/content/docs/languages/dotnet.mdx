@@ -1,0 +1,72 @@
+---
+title: .NET / C#
+description: Use Honker from .NET, including Microsoft.Data.Sqlite and EF Core integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+dotnet add package Honker
+```
+
+The .NET package wraps `Microsoft.Data.Sqlite` and loads the Honker extension.
+
+## Open
+
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db", new OpenOptions
+{
+    ExtensionPath = "./libhonker_ext.dylib",
+    WatcherBackend = "shm",
+});
+```
+
+## Queue
+
+```csharp
+var q = db.Queue("emails");
+q.Enqueue(new { To = "alice@example.com" });
+
+var job = q.ClaimOne("worker-1");
+if (job is not null)
+{
+    job.Ack();
+}
+```
+
+## Transactional Outbox
+
+```csharp
+var outbox = db.Outbox("email", async payload =>
+{
+    await SendEmail(payload);
+});
+
+using (var tx = db.BeginTransaction())
+{
+    tx.Execute("INSERT INTO orders (id, total) VALUES (@p0, @p1)", 42, 9900);
+    outbox.Enqueue(new { OrderId = 42 }, transaction: tx);
+    tx.Commit();
+}
+
+await outbox.RunWorker("email-worker");
+```
+
+## ORM Section
+
+If your app uses `Microsoft.Data.Sqlite` directly, share the same
+`SqliteConnection` and transaction. With EF Core, Honker does not ship an EF
+provider; keep a small wrapper that executes Honker SQL through the same
+connection/transaction EF is using, or move enqueue-critical writes into an
+explicit SQLite transaction.
+
+See the full [.NET ORM recipe](/guides/orm/dotnet/) for connection-sharing
+examples.
+
+## Testing
+
+Use temporary files and subprocess queue workers for watcher backend tests.
+That catches native extension loading, SHM reopen behavior, and wake delivery
+across real .NET processes.

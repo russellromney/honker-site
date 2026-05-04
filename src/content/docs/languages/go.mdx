@@ -1,0 +1,65 @@
+---
+title: Go
+description: Use Honker from Go, including database/sql and GORM integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+go get github.com/russellromney/honker/packages/honker-go
+```
+
+The Go binding uses `mattn/go-sqlite3`, so applications also need the compiled
+`libhonker_ext.{so,dylib,dll}` on disk.
+
+## Open
+
+```go
+db, err := honker.OpenWithOptions("app.db", "./libhonker_ext.so", honker.OpenOptions{
+    WatcherBackend: "shm",
+})
+if err != nil { log.Fatal(err) }
+defer db.Close()
+```
+
+## Queue
+
+```go
+q := db.Queue("emails", honker.QueueOptions{})
+_, _ = q.Enqueue(map[string]any{"to": "alice@example.com"}, honker.EnqueueOptions{})
+
+job, _ := q.ClaimOne("worker-1")
+if job != nil {
+    _ = job.Ack()
+}
+```
+
+## Transactional Outbox
+
+```go
+outbox := db.Outbox("email", func(ctx context.Context, payload json.RawMessage) error {
+    return sendEmail(ctx, payload)
+}, honker.OutboxOptions{})
+
+tx, _ := db.Transaction(ctx)
+_, _ = tx.Exec("INSERT INTO orders (id, total) VALUES (?, ?)", 42, 9900)
+_, _ = outbox.EnqueueTx(tx, map[string]any{"order_id": 42}, honker.EnqueueOptions{})
+_ = tx.Commit()
+
+_ = outbox.RunWorker(ctx, "email-worker")
+```
+
+## ORM Section
+
+For `database/sql`, use the Honker binding directly or register a sqlite3
+driver variant that loads the extension on every connection. For GORM, feed
+that driver name into GORM and run Honker SQL from inside `db.Transaction`.
+
+See the full [Go ORM recipe](/guides/orm/go/) for driver registration and
+accessing the raw `*sql.Tx` in GORM.
+
+## Testing
+
+Use `exec.Command` subprocess workers for watcher-backend proof tests. That
+exercises extension loading per process, SQLite reopen behavior, and
+cross-process wake delivery.

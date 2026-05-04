@@ -1,0 +1,71 @@
+---
+title: Rust
+description: Use the Rust honker crate, including sqlx integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+cargo add honker
+```
+
+Enable experimental watcher backends when you need them:
+
+```toml
+honker = { version = "0.3", features = ["kernel-watcher", "shm-fast-path"] }
+```
+
+## Open
+
+```rust
+use honker::{Database, OpenOptions};
+
+let opts = OpenOptions::default().watcher_backend("shm")?;
+let db = Database::open_with_options("app.db", opts)?;
+```
+
+The Rust binding registers Honker functions directly through `honker-core`; it
+does not need to load a `.so` / `.dylib` at runtime.
+
+## Queue
+
+```rust
+use honker::{EnqueueOpts, QueueOpts};
+use serde_json::json;
+
+let q = db.queue("emails", QueueOpts::default());
+q.enqueue(&json!({"to": "alice@example.com"}), EnqueueOpts::default())?;
+
+if let Some(job) = q.claim_one("worker-1")? {
+    job.ack()?;
+}
+```
+
+## Transactional Outbox
+
+```rust
+let outbox = db.outbox("email", Default::default());
+
+let tx = db.transaction()?;
+tx.execute("INSERT INTO orders (id, total) VALUES (?1, ?2)", (42, 9900))?;
+outbox.enqueue_tx(&tx, &json!({"order_id": 42}), Default::default())?;
+tx.commit()?;
+```
+
+Run delivery workers in a separate process so crashes and restarts preserve the
+same database-backed retry semantics.
+
+## ORM Section
+
+For new Rust apps, prefer the native `honker` crate. For existing `sqlx`
+SQLite apps, load the Honker extension on the same pool connection and execute
+`honker_*` SQL inside the `sqlx::Transaction`.
+
+See the full [Rust ORM recipe](/guides/orm/rust/) for `sqlx` wiring and the
+tradeoff between native `rusqlite` wrappers and ORM-owned connections.
+
+## Testing
+
+Use `tempfile::tempdir()` plus a real `.db` path. If you are testing `shm`,
+keep a connection open while subprocess workers run so SQLite's WAL-index file
+does not disappear between process opens.

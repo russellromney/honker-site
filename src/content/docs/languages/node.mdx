@@ -1,0 +1,77 @@
+---
+title: Node
+description: Use Honker from Node.js, including ORM integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+npm install @russellthehippo/honker-node
+```
+
+The package ships a native `.node` binding for supported release targets.
+
+## Open
+
+```js
+const honker = require("@russellthehippo/honker-node");
+
+const db = honker.open("app.db", undefined, "shm");
+```
+
+The third argument selects the watcher backend. Use `undefined` or `"polling"`
+for the stable default, `"kernel"` for filesystem wake hints, or `"shm"` for
+the WAL-index fast path.
+
+## Queue
+
+```js
+const q = db.queue("emails");
+q.enqueue({ to: "alice@example.com", orderId: 42 });
+
+const job = q.claimOne("worker-1");
+if (job) {
+  await sendEmail(job.payload);
+  job.ack();
+}
+```
+
+## Transactional Outbox
+
+```js
+const outbox = db.outbox("email", async (payload) => {
+  await sendEmail(payload);
+});
+
+const tx = db.transaction();
+try {
+  tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900]);
+  outbox.enqueueTx(tx, { orderId: 42 });
+  tx.commit();
+} catch (error) {
+  tx.rollback();
+  throw error;
+}
+
+await outbox.runWorker("email-worker");
+```
+
+Outbox jobs retry with backoff when delivery throws.
+
+## ORM Section
+
+For `better-sqlite3`, Drizzle, or Kysely-on-SQLite, load the Honker extension
+on the connection your ORM uses and run Honker SQL inside the ORM transaction.
+Prisma owns its SQLite connection more tightly, so the fully atomic path is to
+put the enqueue-critical write in a small explicit SQLite transaction outside
+Prisma or accept that a second Honker connection is not atomic with Prisma's
+write.
+
+See the full [JavaScript / TypeScript ORM recipe](/guides/orm/javascript/) for
+Drizzle, Kysely, and Prisma-adjacent patterns.
+
+## Testing
+
+Use Node's test runner with a temporary file-backed database and spawn worker
+processes for queue/outbox proofs. That catches native extension loading and
+watcher behavior in the same shape production uses.

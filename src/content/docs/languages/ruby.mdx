@@ -1,0 +1,66 @@
+---
+title: Ruby
+description: Use Honker from Ruby and Rails, including ActiveRecord integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+gem install honker
+```
+
+Ruby uses the `sqlite3` gem and a compiled `libhonker_ext.{so,dylib}`. The
+sqlite3 build must expose `enable_load_extension`.
+
+## Open
+
+```ruby
+require "honker"
+
+db = Honker::Database.new(
+  "app.db",
+  extension_path: "./libhonker_ext.dylib",
+  watcher_backend: "shm",
+)
+```
+
+## Queue
+
+```ruby
+q = db.queue("emails")
+q.enqueue({ to: "alice@example.com" })
+
+job = q.claim_one("worker-1")
+if job
+  send_email(job.payload)
+  job.ack
+end
+```
+
+## Transactional Outbox
+
+```ruby
+outbox = db.outbox("email", ->(payload) { SendEmail.call(payload) })
+
+db.transaction do |tx|
+  tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900])
+  outbox.enqueue_tx(tx, { order_id: 42 })
+end
+
+outbox.run_worker("email-worker")
+```
+
+## ORM Section
+
+For Rails and ActiveRecord, load the Honker extension on the ActiveRecord
+SQLite connection, then call `honker_enqueue` or `honker_notify` inside
+`ActiveRecord::Base.transaction`.
+
+See the full [Ruby ORM recipe](/guides/orm/ruby/) for Rails initialization and
+a small wrapper module.
+
+## Testing
+
+Run queue and outbox worker proofs in subprocesses. In CI, require a sqlite3
+gem build with loadable-extension support so watcher e2e coverage cannot
+silently skip.

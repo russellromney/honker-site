@@ -1,0 +1,61 @@
+---
+title: C++
+description: Use Honker from C++, including raw sqlite3 integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+Build the C++ binding from `packages/honker-cpp`, link the produced static
+library, and include `honker.hpp`. C++ apps also need SQLite with extension
+loading enabled.
+
+## Open
+
+```cpp
+#include "honker.hpp"
+
+honker::Database db{"app.db", "./libhonker_ext.dylib", "shm"};
+```
+
+## Queue
+
+```cpp
+auto q = db.queue("emails");
+q.enqueue(R"({"to":"alice@example.com"})");
+
+auto job = q.claim_one("worker-1");
+if (job) {
+  job->ack();
+}
+```
+
+## Transactional Outbox
+
+```cpp
+auto outbox = db.outbox("email", [](const std::string& payload) {
+  send_email(payload);
+});
+
+auto tx = db.transaction();
+tx.execute("INSERT INTO orders (id, total) VALUES (42, 9900)");
+outbox.enqueue_tx(tx, R"({"order_id":42})");
+tx.commit();
+
+outbox.run_once("email-worker");
+```
+
+## ORM Section
+
+For C++ data layers that already own `sqlite3*`, keep Honker as a small helper
+over the same handle. Load the extension on that connection, then execute
+`honker_enqueue`, `honker_notify`, or stream SQL inside the existing
+transaction. If your app can use the Honker `Database` wrapper directly, its
+RAII transaction wrapper is the simplest path.
+
+See the full [C++ ORM recipe](/guides/orm/cpp/) for raw `sqlite3` examples.
+
+## Testing
+
+Exercise constructor failure paths and watcher backend subprocess workers.
+Those tests prove extension load, watcher setup, cleanup on failure, and
+cross-process wake behavior.

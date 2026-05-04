@@ -1,0 +1,84 @@
+---
+title: Python
+description: Use Honker from Python, including ORM integration, watcher backends, queues, and transactional outbox.
+---
+
+## Install
+
+```bash
+pip install honker
+```
+
+The wheel bundles the native extension on supported platforms, so normal
+Python apps do not need a separate `libhonker_ext` file.
+
+## Open
+
+```python
+import honker
+
+db = honker.open("app.db", watcher_backend="shm")
+```
+
+Use `watcher_backend="polling"` for the stable default, `"kernel"` for
+filesystem wake hints, or `"shm"` for the SQLite WAL-index fast path.
+Experimental backends must be compiled into the package and available for the
+database path.
+
+## Queue
+
+```python
+q = db.queue("emails")
+q.enqueue({"to": "alice@example.com", "order_id": 42})
+
+job = q.claim_one("worker-1")
+if job:
+    send_email(job.payload)
+    job.ack()
+```
+
+## Transactional Outbox
+
+Use the outbox when the durable database commit should trigger an external
+side effect such as email, webhooks, cache invalidation, or search indexing.
+
+```python
+outbox = db.outbox("email", lambda payload: send_email(payload))
+
+with db.transaction() as tx:
+    tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", (42, 9900))
+    outbox.enqueue_tx(tx, {"order_id": 42})
+
+await outbox.run_worker("email-worker")
+```
+
+The outbox is just a reserved Honker queue named `_outbox:<name>`, so another
+Python process can deliver jobs after the writer exits.
+
+## ORM Section
+
+For SQLAlchemy, SQLModel, or Django, keep the ORM transaction as the owner of
+your business write. Load the Honker extension on the same SQLite connection,
+then call `honker_enqueue`, `honker_notify`, or stream SQL functions inside
+that transaction.
+
+```python
+from sqlalchemy import text
+
+with Session(engine) as session, session.begin():
+    session.execute(text("INSERT INTO orders (id, total) VALUES (:id, :total)"),
+                    {"id": 42, "total": 9900})
+    session.execute(
+        text("SELECT honker_enqueue(:queue, :payload, NULL, NULL, 0, 3, NULL)"),
+        {"queue": "emails", "payload": '{"order_id":42}'},
+    )
+```
+
+See the full [Python ORM recipe](/guides/orm/python/) for extension loading,
+typed payloads, and Django connection hooks.
+
+## Testing
+
+Use `tmp_path / "test.db"` rather than `:memory:`. Cross-process workers and
+watchers need file locking, WAL, and reopen semantics that in-memory SQLite
+cannot model.
