@@ -28,12 +28,11 @@ Elixir uses `exqlite` and the compiled Honker extension.
 ## Queue
 
 ```elixir
-q = Honker.queue(db, "emails")
-{:ok, _id} = Honker.Queue.enqueue(q, %{to: "alice@example.com"})
+{:ok, _id} = Honker.Queue.enqueue(db, "emails", %{to: "alice@example.com"})
 
-case Honker.Queue.claim_one(q, "worker-1") do
+case Honker.Queue.claim_one(db, "emails", "worker-1") do
   {:ok, job} -> Honker.Job.ack(db, job)
-  :none -> :ok
+  {:ok, nil} -> :ok
 end
 ```
 
@@ -45,9 +44,9 @@ outbox =
     MyApp.Email.deliver(payload)
   end)
 
-Honker.transaction(db, fn tx ->
-  Honker.execute(tx, "INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900])
-  Honker.Outbox.enqueue(outbox, %{order_id: 42}, tx: tx)
+Honker.Transaction.transaction(db, fn tx ->
+  Honker.Transaction.execute(tx, "INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900])
+  Honker.Outbox.enqueue_tx(outbox, tx, %{order_id: 42})
 end)
 
 Honker.Outbox.run_once(outbox, "email-worker")
@@ -57,7 +56,7 @@ Honker.Outbox.run_once(outbox, "email-worker")
 
 For Ecto, load the Honker extension through the SQLite adapter/exqlite
 connection setup. Keep business writes in `Ecto.Multi`, then add a step that
-executes `honker_enqueue` or `honker_notify` on the same transaction.
+executes `honker_enqueue` or `notify` on the same transaction.
 
 See the full [Elixir ORM recipe](/guides/orm/elixir/) for Ecto.Multi examples.
 

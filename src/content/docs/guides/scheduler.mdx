@@ -60,17 +60,18 @@ sched.add({
 
 // Blocks; leader-elected. Cancel via AbortController.
 const ac = new AbortController();
-await sched.run({ owner: 'host-a', signal: ac.signal });
+await sched.run('host-a', ac.signal);
 ```
   </TabItem>
   <TabItem label="Rust">
 ```rust
-use honker::{Database, Scheduler, SchedulerTask};
+use honker::{Database, ScheduledTask};
+use std::sync::{atomic::AtomicBool, Arc};
 
 let db = Database::open("app.db")?;
-let mut scheduler = Scheduler::new(db.clone());
+let scheduler = db.scheduler();
 
-scheduler.add(SchedulerTask {
+scheduler.add(ScheduledTask {
     name: "nightly-backup".into(),
     queue: "backups".into(),
     schedule: "0 3 * * *".into(),
@@ -79,24 +80,28 @@ scheduler.add(SchedulerTask {
     expires_s: Some(3600),
 })?;
 
-scheduler.run()?;   // blocks; leader-elected
+let stop = Arc::new(AtomicBool::new(false));
+scheduler.run(stop, "host-a")?;   // blocks; leader-elected
 ```
   </TabItem>
   <TabItem label="Go">
 ```go
-import honker "github.com/russellromney/honker-go"
+import (
+    "context"
+    honker "github.com/russellromney/honker-go"
+)
 
 db, _ := honker.Open("app.db", "./libhonker_ext.dylib")
 defer db.Close()
 
-sched := honker.NewScheduler(db)
+sched := db.Scheduler()
 sched.Add(honker.SchedulerTask{
     Name:    "nightly-backup",
     Queue:   "backups",
     Schedule: "0 3 * * *",
     Payload: map[string]any{"target": "s3"},
 })
-sched.Run()   // blocks
+sched.Run(context.Background(), "host-a")   // blocks
 ```
   </TabItem>
   <TabItem label="Ruby">
@@ -132,7 +137,8 @@ sched.add({
   expiresS: 3600,
 });
 
-await sched.run();
+const ac = new AbortController();
+await sched.run({ owner: "host-a", signal: ac.signal });
 ```
   </TabItem>
   <TabItem label="Elixir">
@@ -147,7 +153,7 @@ Honker.Scheduler.add(db,
   expires_s: 3600
 )
 
-Honker.Scheduler.run(db)
+Honker.Scheduler.run(db, "host-a", fn -> false end)
 ```
   </TabItem>
   <TabItem label="C++">

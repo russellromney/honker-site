@@ -47,7 +47,7 @@ outbox = db.outbox("email", lambda payload: send_email(payload))
 
 with db.transaction() as tx:
     tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", (42, 9900))
-    outbox.enqueue_tx(tx, {"order_id": 42})
+    outbox.enqueue({"order_id": 42}, tx=tx)
 
 await outbox.run_worker("email-worker")
 ```
@@ -59,7 +59,7 @@ Python process can deliver jobs after the writer exits.
 
 For SQLAlchemy, SQLModel, or Django, keep the ORM transaction as the owner of
 your business write. Load the Honker extension on the same SQLite connection,
-then call `honker_enqueue`, `honker_notify`, or stream SQL functions inside
+then call `honker_enqueue`, `notify`, or stream SQL functions inside
 that transaction.
 
 ```python

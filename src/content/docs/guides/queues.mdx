@@ -348,10 +348,26 @@ For long-running jobs, call `heartbeat` periodically to extend the window:
 
 ```python
 # Python
+import asyncio
+
+async def keepalive(job, stop):
+    while not stop.is_set():
+        await asyncio.sleep(60)
+        job.heartbeat(extend_s=300)
+
 async for job in q.claim("worker-1"):
-    async with heartbeat(job, every_s=60):
+    stop = asyncio.Event()
+    hb = asyncio.create_task(keepalive(job, stop))
+    try:
         await long_running(job.payload)
-    job.ack()
+        job.ack()
+    finally:
+        stop.set()
+        hb.cancel()
+        try:
+            await hb
+        except asyncio.CancelledError:
+            pass
 ```
 
 Other bindings expose a plain `job.heartbeat(extend_s)` that you call on a timer.

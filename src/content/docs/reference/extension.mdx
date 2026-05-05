@@ -3,12 +3,12 @@ title: SQL function reference
 description: The honker_* SQL scalar functions exposed by the SQLite loadable extension.
 ---
 
-The Honker loadable extension (`libhonker.dylib` / `.so` / `.dll`) registers every `honker_*` SQL scalar function on the connection that loads it. Every language binding (Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, .NET / C#, Java, and Kotlin) calls these same functions under the hood — this is the canonical surface.
+The Honker loadable extension (`libhonker_ext.dylib` / `.so` / `.dll`) registers every `honker_*` SQL scalar function on the connection that loads it. Every language binding (Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, .NET / C#, Java, and Kotlin) calls these same functions under the hood — this is the canonical surface.
 
 ## Loading
 
 ```sql
-.load ./libhonker
+.load ./libhonker_ext
 SELECT honker_bootstrap();
 ```
 
@@ -86,7 +86,7 @@ The function name stays `notify()` (not `honker_notify`) to match `pg_notify`'s 
 ## Example: full loop from raw SQLite
 
 ```sql
-.load ./libhonker
+.load ./libhonker_ext
 SELECT honker_bootstrap();
 
 -- Producer

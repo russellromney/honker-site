@@ -116,7 +116,7 @@ int main() {
 SELECT honker_bootstrap();
 
 -- Returns the assigned offset (monotonic within a topic).
-SELECT honker_stream_publish('orders', '{"id":42,"amount":9900}');
+SELECT honker_stream_publish('orders', NULL, '{"id":42,"amount":9900}');
 ```
   </TabItem>
 </Tabs>
@@ -202,7 +202,7 @@ loop = fn loop ->
     {:ok, batch} ->
       Enum.each(batch, fn e -> send_order_email(e.payload) end)
       last = List.last(batch)
-      Honker.Stream.save_offset(db, "orders", "email-worker", last.offset)
+      Honker.Stream.save_offset(db, "email-worker", "orders", last.offset)
       loop.(loop)
   end
 end
@@ -232,11 +232,15 @@ int main() {
   <TabItem label="SQL (extension)">
 ```sql
 -- Read up to 100 events after the consumer's saved offset.
--- Returns a JSON array: [{"offset": ..., "payload": ..., "ts": ...}, ...]
-SELECT honker_stream_read_from_consumer('orders', 'email-worker', 100);
+-- Returns a JSON array: [{"offset": ..., "payload": ..., "created_at": ...}, ...]
+SELECT honker_stream_read_since(
+  'orders',
+  honker_stream_get_offset('email-worker', 'orders'),
+  100
+);
 
 -- Save the consumer's offset after processing.
-SELECT honker_stream_save_offset('orders', 'email-worker', 42);
+SELECT honker_stream_save_offset('email-worker', 'orders', 42);
 ```
   </TabItem>
 </Tabs>

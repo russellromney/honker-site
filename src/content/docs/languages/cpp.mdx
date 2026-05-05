@@ -32,12 +32,16 @@ if (job) {
 ## Transactional Outbox
 
 ```cpp
-auto outbox = db.outbox("email", [](const std::string& payload) {
+auto outbox = db.outbox("email", [](const nlohmann::json& payload) {
   send_email(payload);
 });
 
-auto tx = db.transaction();
-tx.execute("INSERT INTO orders (id, total) VALUES (42, 9900)");
+auto tx = db.begin();
+sqlite3_exec(
+  tx.raw(),
+  "INSERT INTO orders (id, total) VALUES (42, 9900)",
+  nullptr, nullptr, nullptr
+);
 outbox.enqueue_tx(tx, R"({"order_id":42})");
 tx.commit();
 
@@ -48,7 +52,7 @@ outbox.run_once("email-worker");
 
 For C++ data layers that already own `sqlite3*`, keep Honker as a small helper
 over the same handle. Load the extension on that connection, then execute
-`honker_enqueue`, `honker_notify`, or stream SQL inside the existing
+`honker_enqueue`, `notify`, or stream SQL inside the existing
 transaction. If your app can use the Honker `Database` wrapper directly, its
 RAII transaction wrapper is the simplest path.
 

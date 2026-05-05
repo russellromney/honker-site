@@ -20,13 +20,13 @@ Requires Python 3.11+. The wheel bundles the Rust cdylib so you don't need a sep
 npm install @russellthehippo/honker-node
 ```
 
-Requires Node 18+. The `.node` native binary is built per-platform by the release workflow. No separate extension download needed on supported targets (macOS arm64/x86_64, Linux x86_64/aarch64, Windows x86_64).
+Requires Node 20+. The `.node` native binary is built per-platform by the release workflow. No separate extension download needed on supported targets (macOS arm64/x86_64, Linux x86_64/aarch64).
   </TabItem>
   <TabItem label="Rust">
 ```toml
 # Cargo.toml
 [dependencies]
-honker = "0.1"
+honker = "0.3"
 serde_json = "1"
 ```
 
@@ -37,7 +37,7 @@ The `honker` crate pulls in `honker-core` and `honker-extension`. SQLite is vend
 go get github.com/russellromney/honker-go
 ```
 
-Requires Go 1.21+. The Go binding calls into the extension via `mattn/go-sqlite3`, so you also need the compiled `libhonker_ext.{dylib,so,dll}` on disk. Grab it from the release page or build it yourself (see the SQLite extension tab).
+Requires Go 1.25+. The Go binding calls into the extension via `mattn/go-sqlite3`, so you also need the compiled `libhonker_ext.{dylib,so,dll}` on disk. Grab it from the release page or build it yourself (see the SQLite extension tab).
   </TabItem>
   <TabItem label="Ruby">
 ```ruby
@@ -49,14 +49,14 @@ gem "honker"
 bundle install
 ```
 
-Requires Ruby 3.2+. Uses the `sqlite3` gem under the hood. As with Go, Ruby points at a prebuilt `libhonker_ext.{dylib,so}` for the extension.
+Requires Ruby 3.0+. Uses the `sqlite3` gem under the hood. As with Go, Ruby points at a prebuilt `libhonker_ext.{dylib,so}` for the extension.
   </TabItem>
   <TabItem label="Bun">
 ```bash
 bun add @russellthehippo/honker-bun
 ```
 
-Requires Bun 1.1+. Uses `bun:sqlite` and loads the extension from `./libhonker_ext.{dylib,so}`. Prebuilt extension binaries are attached to each GitHub release.
+Requires Bun 1.3+. Uses `bun:sqlite` and loads the extension from `./libhonker_ext.{dylib,so}`. Prebuilt extension binaries are attached to each GitHub release.
   </TabItem>
   <TabItem label="Elixir">
 ```elixir
@@ -70,7 +70,7 @@ end
 mix deps.get
 ```
 
-Requires Elixir 1.15+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path.
+Requires Elixir 1.17+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path.
   </TabItem>
   <TabItem label=".NET">
 ```bash
@@ -85,7 +85,7 @@ Targets `net8.0` and `net10.0`. The NuGet package bundles the native extension f
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker</artifactId>
-  <version>0.0.0-SNAPSHOT</version>
+  <version>0.1.0</version>
 </dependency>
 ```
 
@@ -97,7 +97,7 @@ Requires Java 17+. The JVM binding uses `org.xerial:sqlite-jdbc` and bundles the
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker-kotlin</artifactId>
-  <version>0.0.0-SNAPSHOT</version>
+  <version>0.1.0</version>
 </dependency>
 ```
 
@@ -235,11 +235,10 @@ job.ack();
   <TabItem label="Elixir">
 ```elixir
 {:ok, db} = Honker.open("app.db", extension_path: "./libhonker_ext.dylib")
-q = Honker.queue(db, "greetings")
 
-Honker.Queue.enqueue(q, %{name: "world"})
+{:ok, _id} = Honker.Queue.enqueue(db, "greetings", %{name: "world"})
 
-{:ok, job} = Honker.Queue.claim_one(q, "worker-1")
+{:ok, job} = Honker.Queue.claim_one(db, "greetings", "worker-1")
 IO.puts("hello, #{job.payload["name"]}!")
 Honker.Job.ack(db, job)
 ```
@@ -415,7 +414,7 @@ while (running) {
   <TabItem label="Elixir">
 ```elixir
 loop = fn loop ->
-  case Honker.Queue.claim_one(q, "worker-1") do
+  case Honker.Queue.claim_one(db, "emails", "worker-1") do
     {:ok, nil} -> :timer.sleep(100); loop.(loop)
     {:ok, job} ->
       try do
@@ -620,10 +619,10 @@ tx.commit();
   </TabItem>
   <TabItem label="Elixir">
 ```elixir
-Honker.transaction(db, fn tx ->
-  Honker.execute(tx, "INSERT INTO orders (id, total, customer_id) VALUES (?, ?, ?)",
+Honker.Transaction.transaction(db, fn tx ->
+  Honker.Transaction.execute(tx, "INSERT INTO orders (id, total, customer_id) VALUES (?, ?, ?)",
     [42, 9900, "alice"])
-  Honker.Queue.enqueue(q, %{order_id: 42, email_type: "confirmation"}, tx: tx)
+  Honker.Queue.enqueue_tx(tx, "emails", %{order_id: 42, email_type: "confirmation"}, [], [])
 end)
 ```
   </TabItem>

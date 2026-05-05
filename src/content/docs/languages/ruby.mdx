@@ -44,7 +44,7 @@ outbox = db.outbox("email", ->(payload) { SendEmail.call(payload) })
 
 db.transaction do |tx|
   tx.execute("INSERT INTO orders (id, total) VALUES (?, ?)", [42, 9900])
-  outbox.enqueue_tx(tx, { order_id: 42 })
+  outbox.enqueue({ order_id: 42 }, tx: tx)
 end
 
 outbox.run_worker("email-worker")
@@ -53,7 +53,7 @@ outbox.run_worker("email-worker")
 ## ORM Section
 
 For Rails and ActiveRecord, load the Honker extension on the ActiveRecord
-SQLite connection, then call `honker_enqueue` or `honker_notify` inside
+SQLite connection, then call `honker_enqueue` or `notify` inside
 `ActiveRecord::Base.transaction`.
 
 See the full [Ruby ORM recipe](/guides/orm/ruby/) for Rails initialization and
