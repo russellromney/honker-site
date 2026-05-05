@@ -163,15 +163,21 @@ job.ack();
 use honker::{Database, QueueOpts, EnqueueOpts};
 use serde_json::json;
 
-let db = Database::open("app.db")?;
-let q = db.queue("greetings", QueueOpts::default());
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("app.db")?;
+    let q = db.queue("greetings", QueueOpts::default());
 
-q.enqueue(&json!({"name": "world"}), EnqueueOpts::default())?;
+    q.enqueue(&json!({"name": "world"}), EnqueueOpts::default())?;
 
-if let Some(job) = q.claim_one("worker-1")? {
-    println!("hello, {}!", job.payload["name"]);
-    job.ack()?;
+    if let Some(job) = q.claim_one("worker-1")? {
+        let payload: serde_json::Value = serde_json::from_slice(&job.payload)?;
+        println!("hello, {}!", payload["name"]);
+        job.ack()?;
+    }
+
+    Ok(())
 }
+
 ```
   </TabItem>
   <TabItem label="Go">
