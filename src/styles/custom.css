@@ -26,9 +26,9 @@
    * for subtle backgrounds and accent-high is the darkest brown for
    * high-contrast text. #8a5418 against white clears WCAG AA (~5.8:1)
    * for links and buttons. */
-  --sl-color-accent-low: #fbecdc;
-  --sl-color-accent: #9f765d;
-  --sl-color-accent-high: #533d32;
+  --sl-color-accent-low: #fde4cb;
+  --sl-color-accent: #8a5418;
+  --sl-color-accent-high: #3a2512;
 
   /* Invert the custom gray ramp. Starlight's automatic reversal only
    * applies to its own defaults; since we override these in :root we
