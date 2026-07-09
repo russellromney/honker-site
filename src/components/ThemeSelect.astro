@@ -1,24 +1,28 @@
 ---
-// Theme picker: Light and Dark only.
+// Theme picker: two buttons (Light / Dark).
 // Default (no localStorage): follow system prefers-color-scheme.
 // Choosing light or dark is remembered in localStorage.
-import Select from '@astrojs/starlight/components/Select.astro';
+import { Icon } from '@astrojs/starlight/components';
+
+const lightLabel = Astro.locals.t('themeSelect.light');
+const darkLabel = Astro.locals.t('themeSelect.dark');
+const groupLabel = Astro.locals.t('themeSelect.accessibleLabel');
 ---
 
 <starlight-theme-select>
-	<Select
-		icon="moon"
-		label={Astro.locals.t('themeSelect.accessibleLabel')}
-		value="dark"
-		options={[
-			{ label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
-			{ label: Astro.locals.t('themeSelect.light'), selected: false, value: 'light' },
-		]}
-		width="5.5em"
-	/>
+	<div class="theme-buttons" role="group" aria-label={groupLabel}>
+		<button type="button" class="theme-btn" data-theme-value="light" aria-pressed="false" title={lightLabel}>
+			<span class="sr-only">{lightLabel}</span>
+			<Icon name="sun" />
+		</button>
+		<button type="button" class="theme-btn" data-theme-value="dark" aria-pressed="false" title={darkLabel}>
+			<span class="sr-only">{darkLabel}</span>
+			<Icon name="moon" />
+		</button>
+	</div>
 </starlight-theme-select>
 
-{/* Sync pickers after paint using ThemeProvider's early bootstrap. */}
+{/* Sync pressed state after paint using ThemeProvider's early bootstrap. */}
 <script is:inline>
 	StarlightThemeProvider.updatePickers();
 </script>
@@ -65,13 +69,62 @@ import Select from '@astrojs/starlight/components/Select.astro';
 			// Initial: resolve system or stored preference. Do not write storage
 			// unless the user interacts — keeps system as the true default.
 			applyTheme(loadPref(), false);
-			this.querySelector('select')?.addEventListener('change', (e) => {
-				if (e.currentTarget instanceof HTMLSelectElement) {
-					const next = parseTheme(e.currentTarget.value);
-					if (next) applyTheme(next, true);
-				}
+			this.addEventListener('click', (e) => {
+				const target = e.target;
+				if (!(target instanceof Element)) return;
+				const btn = target.closest('button[data-theme-value]');
+				if (!(btn instanceof HTMLButtonElement) || !this.contains(btn)) return;
+				const next = parseTheme(btn.dataset.themeValue);
+				if (next) applyTheme(next, true);
 			});
 		}
 	}
 	customElements.define('starlight-theme-select', StarlightThemeSelect);
 </script>
+
+<style>
+	.theme-buttons {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.15rem;
+		padding: 0.15rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 999px;
+		background: var(--sl-color-gray-6);
+	}
+
+	.theme-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.85rem;
+		height: 1.85rem;
+		padding: 0;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--sl-color-gray-2);
+		cursor: pointer;
+		line-height: 0;
+	}
+
+	.theme-btn:hover {
+		color: var(--sl-color-white);
+		background: var(--sl-color-gray-5);
+	}
+
+	.theme-btn[aria-pressed='true'] {
+		color: var(--sl-color-black);
+		background: var(--sl-color-accent-high);
+	}
+
+	.theme-btn:focus-visible {
+		outline: 2px solid var(--sl-color-accent);
+		outline-offset: 2px;
+	}
+
+	.theme-btn :global(svg) {
+		width: 0.95rem;
+		height: 0.95rem;
+	}
+</style>
