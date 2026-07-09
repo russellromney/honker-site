@@ -1,0 +1,68 @@
+---
+// FOUC-safe theme bootstrap. Empty localStorage = follow system.
+// Explicit 'light' | 'dark' = remembered override.
+import { Icon } from '@astrojs/starlight/components';
+---
+
+{/* Inlined to avoid FOUC. */}
+<script is:inline>
+	window.StarlightThemeProvider = (() => {
+		const storageKey = 'starlight-theme';
+
+		/** @returns {'light' | 'dark'} */
+		const systemTheme = () =>
+			window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+		/** @returns {'light' | 'dark' | null} null means follow system */
+		const loadPref = () => {
+			const stored =
+				typeof localStorage !== 'undefined' && localStorage.getItem(storageKey);
+			return stored === 'light' || stored === 'dark' ? stored : null;
+		};
+
+		/** Resolve stored preference or system into a concrete theme. */
+		const resolve = (/** @type {'light' | 'dark' | null | undefined} */ pref) =>
+			pref === 'light' || pref === 'dark' ? pref : systemTheme();
+
+		const applied = resolve(loadPref());
+		document.documentElement.dataset.theme = applied;
+
+		return {
+			/**
+			 * Sync every theme select + its icon.
+			 * Accepts 'light' | 'dark' | 'auto' | undefined.
+			 * Select only has light/dark options, so always set a concrete value.
+			 * @param {'light' | 'dark' | 'auto'} [theme]
+			 */
+			updatePickers(theme) {
+				const pref =
+					theme === 'light' || theme === 'dark'
+						? theme
+						: theme === 'auto'
+							? null
+							: loadPref();
+				const concrete = resolve(pref);
+
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = concrete;
+
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector('#theme-icons');
+					const newIcon = tmpl && tmpl.content.querySelector('.' + concrete);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script>
+
+<template id="theme-icons">
+	<Icon name="sun" class="light" />
+	<Icon name="moon" class="dark" />
+</template>

@@ -1,0 +1,77 @@
+---
+// Theme picker: Light and Dark only.
+// Default (no localStorage): follow system prefers-color-scheme.
+// Choosing light or dark is remembered in localStorage.
+import Select from '@astrojs/starlight/components/Select.astro';
+---
+
+<starlight-theme-select>
+	<Select
+		icon="moon"
+		label={Astro.locals.t('themeSelect.accessibleLabel')}
+		value="dark"
+		options={[
+			{ label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
+			{ label: Astro.locals.t('themeSelect.light'), selected: false, value: 'light' },
+		]}
+		width="5.5em"
+	/>
+</starlight-theme-select>
+
+{/* Sync pickers after paint using ThemeProvider's early bootstrap. */}
+<script is:inline>
+	StarlightThemeProvider.updatePickers();
+</script>
+
+<script>
+	type Theme = 'dark' | 'light';
+	type Pref = Theme | null; // null = follow system
+
+	const storageKey = 'starlight-theme';
+
+	const parseTheme = (theme: unknown): Theme | null =>
+		theme === 'dark' || theme === 'light' ? theme : null;
+
+	const loadPref = (): Pref =>
+		parseTheme(typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
+
+	const storePref = (theme: Theme): void => {
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem(storageKey, theme);
+		}
+	};
+
+	const systemTheme = (): Theme =>
+		matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+	const resolve = (pref: Pref): Theme => pref ?? systemTheme();
+
+	/** Apply a concrete theme and optionally remember an explicit choice. */
+	function applyTheme(pref: Pref, remember: boolean): void {
+		const concrete = resolve(pref);
+		StarlightThemeProvider.updatePickers(concrete);
+		document.documentElement.dataset.theme = concrete;
+		if (remember) storePref(concrete);
+	}
+
+	// Follow OS changes only while the user has no explicit choice.
+	matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+		if (loadPref() === null) applyTheme(null, false);
+	});
+
+	class StarlightThemeSelect extends HTMLElement {
+		constructor() {
+			super();
+			// Initial: resolve system or stored preference. Do not write storage
+			// unless the user interacts — keeps system as the true default.
+			applyTheme(loadPref(), false);
+			this.querySelector('select')?.addEventListener('change', (e) => {
+				if (e.currentTarget instanceof HTMLSelectElement) {
+					const next = parseTheme(e.currentTarget.value);
+					if (next) applyTheme(next, true);
+				}
+			});
+		}
+	}
+	customElements.define('starlight-theme-select', StarlightThemeSelect);
+</script>

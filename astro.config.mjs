@@ -49,6 +49,10 @@ export default defineConfig({
         // Prepend a GitHub star-count badge to the social-icons cluster.
         // Stars are fetched at build time via the public GH API.
         SocialIcons: './src/components/SocialIcons.astro',
+        // Light/Dark only. No "Auto" option. Empty localStorage follows
+        // system prefers-color-scheme; an explicit pick is remembered.
+        ThemeProvider: './src/components/ThemeProvider.astro',
+        ThemeSelect: './src/components/ThemeSelect.astro',
       },
       sidebar: [
         {
