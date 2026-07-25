@@ -57,7 +57,7 @@ The kernel and shm backends are gated behind Cargo features (`kernel-watcher`, `
 
 - **Stay on polling** unless you have a specific reason to switch. It's the only backend that promises every wake fires once and only once. It works in every journal mode. It's the only one in published wheels. The CPU cost — about 3.5 ms per second of busy work — is rounding error on any modern machine.
 - **Try kernel** if you're running many honker'd databases on one host and want idle CPU near zero, or if you're on Linux and want wakes faster than 1 ms. The catch: some wakes can be lost if the OS drops events under load. Consumers re-read state on every wake, so a lost wake means delayed work, not lost work.
-- **Try shm** if you're on a high-QPS WAL workload and the 1 ms default wake is too slow (rare). Wakes drop to under a microsecond. The catch: it reads SQLite's WAL index format directly, so a future SQLite version that changes that format would break it.
+- **Try shm** if you're on a high-QPS WAL workload and the per-check cost of the 1 ms poll matters (rare). The cadence stays at 1 ms like polling, but each check drops from a ~3.5 µs `PRAGMA data_version` read to a memory load. The catch: it reads SQLite's WAL index format directly, so a future SQLite version that changes that format would break it.
 
 Rule of thumb: if you can't say in one sentence what you'd gain by switching, stay on polling.
 
@@ -87,8 +87,8 @@ Bad:
 Reads `iChange` at byte 8 of SQLite's WAL index header (`-shm` file) via mmap. SQLite increments `iChange` on every WAL write. The watcher compares the current value to the previous one every millisecond and fires a wake on change.
 
 Good:
-- Sub-microsecond wake detection. A memory load instead of a SQLite query.
-- Same low latency under heavy load.
+- Cheaper checks. A memory load instead of a SQLite query — the per-check cost drops from ~3.5 µs to sub-microsecond (the poll cadence is still 1 ms).
+- Same low cost under heavy load.
 
 Bad:
 - WAL only. No `-shm` file exists in DELETE / TRUNCATE / PERSIST. If you ask for shm in those modes, `honker.open()` raises immediately.
@@ -110,7 +110,7 @@ When the watcher panics, every active subscriber's wake channel is closed. Consu
 
 - **Rust:** `update_events().recv()` returns `Err(RecvError)`.
 - **Python:** `await events.__anext__()` raises `RuntimeError("honker: update watcher died (database file likely replaced; recreate honker.open() to recover)")`.
-- **Node:** `await events.next()` rejects with the same message.
+- **Node:** `await events.next()` rejects with a `'watcher died'` message. Older versions reject with `"receiving on a closed channel"` instead.
 
 Not a silent hang. Not just a line in stderr you'll never read.
 
@@ -144,7 +144,12 @@ async function consume() {
         // ... do work ...
       }
     } catch (e) {
-      if (!String(e.message).includes('watcher died')) throw e;
+      // 'watcher died' on current versions; older versions say
+      // 'closed channel' — which close() also rejects a pending wait with.
+      if (
+        !String(e.message).includes('watcher died') &&
+        !String(e.message).includes('closed channel')
+      ) throw e;
       db.close();
       db = honker.open('app.db');
     }
@@ -173,10 +178,10 @@ honker-core = { version = "...", features = ["kernel-watcher", "shm-fast-path"] 
 
 # Node (napi-rs)
 cd packages/honker-node
-CARGO_BUILD_FEATURES=kernel-watcher,shm-fast-path npm run build
+npm run build -- --features kernel-watcher,shm-fast-path
 ```
 
-If the requested backend can't start at runtime (shm needs WAL plus an open connection; kernel needs the OS notify API), `honker.open()` raises right away. If you ask for a backend whose Cargo feature isn't compiled into your binary (the published-wheels case), it falls back to polling and logs once to stderr. Either way, no silent swap.
+If the requested backend can't start at runtime (shm needs WAL plus an open connection; kernel needs the OS notify API), `honker.open()` raises right away. If you ask for a backend whose Cargo feature isn't compiled into your binary (the published-wheels case), the open call fails loudly too — it throws with an error naming the missing feature. No binding silently falls back to polling.
 
 ## What we haven't tested yet
 

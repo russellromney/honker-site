@@ -30,7 +30,7 @@ All bindings share these rules:
 - Keep business writes and Honker calls in the same transaction when you need atomic enqueue, publish, notify, or outbox behavior.
 - Use a separate worker process for production queue and outbox delivery.
 - If your ORM owns the connection, load the Honker extension there and call `honker_*` SQL functions inside the ORM transaction.
-- `watcher_backend` / `watcherBackend` accepts `poll`, `polling`, `kernel`, `kernel-watcher`, `shm`, and `shm-fast-path`. Explicit experimental backend requests fail rather than silently falling back.
+- `watcher_backend` / `watcherBackend` accepts `poll`, `polling`, `kernel`, `kernel-watcher`, `shm`, and `shm-fast-path`. Explicit experimental backend requests fail rather than silently falling back — at open in most bindings; in the JVM/Kotlin bindings the watcher is created lazily, so the failure surfaces when a subscriber attaches.
 
 The detailed ORM recipes still live under [Using with an ORM](/guides/orm/).
 These language pages include the short version so each binding doc stands on
