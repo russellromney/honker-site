@@ -17,13 +17,14 @@ Python apps do not need a separate `libhonker_ext` file.
 ```python
 import honker
 
-db = honker.open("app.db", watcher_backend="shm")
+db = honker.open("app.db")
 ```
 
-Use `watcher_backend="polling"` for the stable default, `"kernel"` for
-filesystem wake hints, or `"shm"` for the SQLite WAL-index fast path.
-Experimental backends must be compiled into the package and available for the
-database path.
+The default is `watcher_backend="polling"`, the stable backend. `"kernel"`
+(filesystem wake hints) and `"shm"` (the SQLite WAL-index fast path) are
+experimental opt-ins that raise unless the package was built with the matching
+Cargo features — published wheels are polling-only, so build from source with
+`maturin develop --release --features kernel-watcher,shm-fast-path` to use them.
 
 ## Queue
 

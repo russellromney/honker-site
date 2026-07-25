@@ -8,7 +8,8 @@ functions. Bindings are thin language wrappers over that same shape.
 
 "Yes" means the feature has a typed binding and runs in root CI. "SQL"
 means the extension feature is available through raw SQL, but the
-language wrapper does not expose the nice API yet. For install and ORM
+language wrapper does not expose the nice API yet. "local" under Package
+proof means the proof runs outside root CI (see below). For install and ORM
 details, see the [language guides](/languages/).
 
 | Binding | Package proof | Queue | Streams | Notify/listen | Scheduler | Outbox | Watcher backends |
@@ -18,11 +19,11 @@ details, see the [language guides](/languages/).
 | Node `@russellthehippo/honker-node` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
 | .NET `Honker` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Rust `honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Go | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+| Go | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Bun `@russellthehippo/honker-bun` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | C++ | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Java `dev.honker:honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Kotlin `dev.honker:honker-kotlin` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Java `dev.honker:honker` | local | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Kotlin `dev.honker:honker-kotlin` | local | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Ruby `honker` | yes | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
 | Elixir `honker` | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
 
@@ -32,12 +33,13 @@ details, see the [language guides](/languages/).
 - PR CI runs Python on Linux, macOS, and Windows.
 - PR CI runs Node on Linux, macOS, and Windows.
 - PR CI runs .NET on Linux, macOS, and Windows.
-- PR CI runs Java and Kotlin package tests on Linux, macOS, and Windows.
 - The aggregate Linux binding smoke runs Rust wrapper, Go, .NET
-  Python interop, C++, Bun, Ruby, Elixir, Java/Kotlin, and Ruby/Python interop.
+  Python interop, C++, Bun, Ruby, Elixir, and Ruby/Python interop.
 - The packaged-install proof workflow builds and installs Python,
   Node, Ruby, and .NET packages into clean throwaway consumers.
-- Watcher-backend queue proofs run cross-process for every binding so
+- Java and Kotlin are proven locally: Maven package tests plus a clean
+  consumer proof outside the repo. No JVM/Kotlin jobs run in PR CI.
+- Node runs cross-process watcher-backend queue proofs so
   extension loading, database reopen, SHM reopen, wake delivery, and
   no-fallback behavior are exercised outside a single runtime process.
 
@@ -50,5 +52,5 @@ details, see the [language guides](/languages/).
   and shared table behavior. It does not run N x N interop.
 - Long soak on every OS. The scary nightly workflow soaks Linux; PR CI
   stays shorter.
-- Go, Ruby, and Elixir expose notifications and update-waiting without
-  the same high-level async listener shape as Python/Node/.NET/Rust/Bun/C++/JVM.
+- Ruby and Elixir expose notifications and update-waiting without
+  the same high-level async listener shape as Python/Node/.NET/Rust/Go/Bun/C++/JVM.

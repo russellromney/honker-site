@@ -13,7 +13,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 pip install honker
 ```
 
-Requires Python 3.11+. The wheel bundles the Rust cdylib so you don't need a separate extension download. macOS (arm64, x86_64) and Linux (x86_64, aarch64) wheels are published.
+Requires Python 3.11+. The wheel bundles the Rust cdylib so you don't need a separate extension download. macOS (arm64, x86_64), Linux (x86_64, aarch64), and Windows (x86_64) wheels are published.
   </TabItem>
   <TabItem label="Node">
 ```bash
@@ -26,7 +26,7 @@ Requires Node 20+. The `.node` native binary is built per-platform by the releas
 ```toml
 # Cargo.toml
 [dependencies]
-honker = "0.3"
+honker = "0.4"
 serde_json = "1"
 ```
 
@@ -62,7 +62,7 @@ Requires Bun 1.3+. Uses `bun:sqlite` and loads the extension from `./libhonker_e
 ```elixir
 # mix.exs
 def deps do
-  [{:honker, "~> 0.1"}]
+  [{:honker, "~> 0.4"}]
 end
 ```
 
@@ -85,7 +85,7 @@ Targets `net8.0` and `net10.0`. The NuGet package bundles the native extension f
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker</artifactId>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
@@ -97,7 +97,7 @@ Requires Java 17+. The JVM binding uses `org.xerial:sqlite-jdbc` and bundles the
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker-kotlin</artifactId>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
@@ -110,7 +110,7 @@ cd honker-cpp
 zig build
 ```
 
-Requires Zig 0.16+, a C++17 compiler, and SQLite 3.9+ with extension loading. On macOS use Homebrew's `sqlite3` (Apple's system build omits `load_extension`). Link against the built `libhonker_cpp.a` static library and include `include/honker.hpp`.
+Requires Zig 0.15+, a C++17 compiler, and SQLite 3.9+ with extension loading. On macOS use Homebrew's `sqlite3` (Apple's system build omits `load_extension`). Link against the built `libhonker_cpp.a` static library and include `include/honker.hpp`.
   </TabItem>
   <TabItem label="SQLite extension">
 Build from source. It's one crate:
@@ -346,6 +346,25 @@ async def main():
             job.retry(delay_s=60, error=str(e))
 
 asyncio.run(main())
+```
+  </TabItem>
+  <TabItem label="Node">
+```js
+const { open } = require('@russellthehippo/honker-node');
+const db = open('app.db');
+const q = db.queue('emails');
+
+// Async iterator — wakes on database updates or due deadlines.
+for await (const job of q.claim('worker-1')) {
+  try {
+    await sendEmail(job.payload);
+    job.ack();
+  } catch (err) {
+    // Scheduled retry with backoff. After maxAttempts (default 3),
+    // the job moves to _honker_dead with last_error set.
+    job.retry(60, String(err));
+  }
+}
 ```
   </TabItem>
   <TabItem label="Rust">

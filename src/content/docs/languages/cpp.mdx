@@ -7,7 +7,9 @@ description: Use Honker from C++, including raw sqlite3 integration, watcher bac
 
 Build the C++ binding from `packages/honker-cpp`, link the produced static
 library, and include `honker.hpp`. C++ apps also need SQLite with extension
-loading enabled.
+loading enabled and the nlohmann-json headers (`honker.hpp` includes
+`<nlohmann/json.hpp>`) — e.g. `brew install nlohmann-json` on macOS or
+`apt-get install nlohmann-json3-dev` on Debian/Ubuntu.
 
 ## Open
 

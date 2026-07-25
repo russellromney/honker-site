@@ -30,7 +30,7 @@ _, _ = q.Enqueue(map[string]any{"to": "alice@example.com"}, honker.EnqueueOption
 
 job, _ := q.ClaimOne("worker-1")
 if job != nil {
-    _ = job.Ack()
+    _, _ = job.Ack()
 }
 ```
 

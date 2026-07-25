@@ -11,7 +11,7 @@ Java:
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker</artifactId>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
@@ -21,7 +21,7 @@ Kotlin:
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker-kotlin</artifactId>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
@@ -68,8 +68,11 @@ honker("app.db", openOptions {
 ```
 
 `WatcherBackend.AUTO` and `PRAGMA_DATA_VERSION` use the stable pragma watcher.
-`MMAP_SHM` and `KERNEL_EVENTS` are explicit experimental backends; if they cannot
-initialize, opening the database fails instead of silently falling back.
+`MMAP_SHM` and `KERNEL_EVENTS` are explicit experimental backends. Unlike the
+Rust, Go, .NET, Ruby, and Elixir bindings — which fail at open — the JVM
+watcher is created lazily, so a failed experimental backend surfaces when a
+subscriber attaches (via `throwIfFailed` on the listener/stream handles), not
+at `Honker.open()`.
 
 ## Queue
 

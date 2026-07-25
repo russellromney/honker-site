@@ -12,17 +12,22 @@ cargo add honker
 Enable experimental watcher backends when you need them:
 
 ```toml
-honker = { version = "0.3", features = ["kernel-watcher", "shm-fast-path"] }
+honker = { version = "0.4", features = ["kernel-watcher", "shm-fast-path"] }
 ```
 
 ## Open
 
 ```rust
-use honker::{Database, OpenOptions};
+use honker::Database;
 
-let opts = OpenOptions::default().watcher_backend("shm")?;
-let db = Database::open_with_options("app.db", opts)?;
+let db = Database::open("app.db")?;
 ```
+
+The default polling watcher backend needs no extra features. To opt into the
+experimental `shm` or `kernel` backends, enable the Cargo features above and
+open with `OpenOptions::default().watcher_backend("shm")?` passed to
+`Database::open_with_options` — an explicit request for a backend whose feature
+isn't compiled in fails instead of silently falling back.
 
 The Rust binding registers Honker functions directly through `honker-core`; it
 does not need to load a `.so` / `.dylib` at runtime.

@@ -17,8 +17,13 @@ Bun loads the Honker SQLite extension through `bun:sqlite`, so keep
 ```ts
 import { open } from "@russellthehippo/honker-bun";
 
-const db = open("app.db", "./libhonker_ext.dylib", { watcherBackend: "shm" });
+const db = open("app.db", "./libhonker_ext.dylib");
 ```
+
+The default polling watcher backend is always available. `open(..., { watcherBackend: "shm" })`
+or `"kernel"` opts into the experimental backends — they throw unless the loaded
+extension was built with the matching Cargo features (official release artifacts
+have them; source builds per these docs don't).
 
 ## Queue
 

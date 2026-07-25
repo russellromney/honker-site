@@ -211,8 +211,14 @@ db.prune_notifications(older_than_s=3600)   # delete rows older than 1 hour
 db.prune_notifications(max_keep=10_000)     # keep only the most recent 10k
 ```
 
+```js
+// Node
+db.pruneNotifications(3600);        // delete rows older than 1 hour
+db.pruneNotifications(null, 10000); // keep only the most recent 10k
+```
+
+There are no `honker_prune_*` SQL functions — pruning is a binding-level helper. From raw SQL, delete against the table directly:
+
 ```sql
--- From SQL
-SELECT honker_prune_notifications_older_than(3600);
-SELECT honker_prune_notifications_keep_latest(10000);
+DELETE FROM _honker_notifications WHERE created_at < unixepoch() - 3600;
 ```
