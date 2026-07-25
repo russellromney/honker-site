@@ -29,7 +29,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 use std::str::FromStr;
 
-let opts = SqliteConnectOptions::from_str("sqlite:///app.db")?
+let opts = SqliteConnectOptions::from_str("sqlite://app.db")?
     .extension("/path/to/libhonker_ext");
 
 let mut conn = opts.connect().await?;

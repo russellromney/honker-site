@@ -6,6 +6,8 @@ description: Huey-style @task decorators on top of honker queues.
 Decorators let you write queue code that looks synchronous:
 
 ```python
+import time
+
 import honker
 
 db = honker.open("app.db")

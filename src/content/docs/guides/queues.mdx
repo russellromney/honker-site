@@ -296,6 +296,13 @@ for j in jobs:
 q.ack_batch([j.id for j in jobs], "worker-1")
 ```
   </TabItem>
+  <TabItem label="Node">
+```js
+const jobs = q.claimBatch('worker-1', 100);
+for (const j of jobs) process(j.payload);
+q.ackBatch(jobs.map((j) => j.id), 'worker-1');
+```
+  </TabItem>
   <TabItem label="Rust">
 ```rust
 let jobs = q.claim_batch("worker-1", 100)?;
@@ -398,7 +405,7 @@ q.cancel(id);                 // true / false (idempotent)
 
 `get_job` only returns rows from `_honker_live` (pending or processing). For dead jobs query `_honker_dead` directly.
 
-Both methods are available in every binding (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++).
+Both methods are available in every binding except Java/Kotlin (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++). The JVM bindings don't expose them yet — call `honker_cancel` / `honker_get_job` over raw SQL there.
 
 ## Retry, fail, dead-letter
 

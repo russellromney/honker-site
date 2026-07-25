@@ -27,6 +27,8 @@ SELECT honker_bootstrap();
 | `honker_heartbeat(job_id, worker_id, extend_s)` | 3 args | 1 if extended |
 | `honker_sweep_expired(queue)` | 1 arg | count moved to dead |
 | `honker_queue_next_claim_at(queue)` | 1 arg | next `run_at` / reclaim deadline, or 0 |
+| `honker_cancel(job_id)` | 1 arg | 1 if a pending/processing row was removed, 0 otherwise (idempotent) |
+| `honker_get_job(job_id)` | 1 arg | JSON object of the row, or empty string on miss |
 
 ## Streams
 
@@ -50,9 +52,15 @@ The function name stays `notify()` (not `honker_notify`) to match `pg_notify`'s 
 | Function | Arguments | Returns |
 |---|---|---|
 | `honker_scheduler_register(name, queue, cron_expr, payload, priority, expires_s)` | 6 args | 1 |
+| `honker_scheduler_register(name, queue, cron_expr, payload, priority, expires_s, max_attempts)` | 7 args | 1 |
 | `honker_scheduler_unregister(name)` | 1 arg | rows deleted |
 | `honker_scheduler_tick(now_unix)` | 1 arg | JSON array of fires |
 | `honker_scheduler_soonest()` | 0 args | min `next_fire_at` (unix ts) |
+| `honker_scheduler_pause(name)` | 1 arg | 1 if toggled, 0 otherwise |
+| `honker_scheduler_resume(name)` | 1 arg | 1 if toggled, 0 otherwise |
+| `honker_scheduler_list()` | 0 args | JSON array of all schedules with state |
+| `honker_scheduler_update(name, cron_expr_or_null, payload_or_null, priority_or_null, expires_s_or_null, touch_expires)` | 6 args | 1 if updated, 0 if missing |
+| `honker_scheduler_update(name, cron_expr_or_null, payload_or_null, priority_or_null, expires_s_or_null, touch_expires, max_attempts_or_null, touch_max_attempts)` | 8 args | 1 if updated, 0 if missing |
 | `honker_cron_next_after(expr, from_unix)` | 2 args | next unix ts |
 
 `cron_expr` is the stored schedule expression. It can be:
@@ -61,12 +69,15 @@ The function name stays `notify()` (not `honker_notify`) to match `pg_notify`'s 
 - 6-field cron
 - `@every <n><unit>` like `@every 5s`
 
+The 7-arg `honker_scheduler_register` form pins `max_attempts` (default 3) on every job the scheduler enqueues for the task. In `honker_scheduler_update`, `touch_expires` (and `touch_max_attempts` in the 8-arg form) is a 0/1 flag: when 1, the corresponding arg is the desired value (NULL clears); when 0, that field is left untouched.
+
 ## Locks
 
 | Function | Arguments | Returns |
 |---|---|---|
 | `honker_lock_acquire(name, owner, ttl_s)` | 3 args | 1 if got it, 0 if held |
 | `honker_lock_release(name, owner)` | 2 args | 1 if released |
+| `honker_lock_renew(name, owner, ttl_s)` | 3 args | 1 if this owner still holds it and the TTL was extended |
 
 ## Rate limits
 

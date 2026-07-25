@@ -56,6 +56,7 @@ sched.add({
   name: 'heartbeat',
   queue: 'health',
   schedule: '@every 1s',
+  payload: null,
 });
 
 // Blocks; leader-elected. Cancel via AbortController.
@@ -222,7 +223,7 @@ sched.add(name="recap", queue="emails", schedule=crontab("0 9 * * 1"),
 # Stop firing without losing the row.
 sched.pause("recap")
 
-# What's scheduled? Each row has cron, payload, priority, enabled, next_fire_at.
+# What's scheduled? Each row has cron_expr, payload, priority, enabled, next_fire_at.
 for row in sched.list():
     print(row["name"], row["enabled"], row["next_fire_at"])
 
@@ -249,7 +250,7 @@ sched.resume("recap");
 sched.remove("recap");
 ```
 
-`pause` / `resume` are idempotent — calling pause on an already-paused schedule returns `false`. `update` with no field args is a no-op (returns `false`). All methods are available in every binding (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++).
+`pause` / `resume` are idempotent — calling pause on an already-paused schedule returns `false`. `update` with no field args is a no-op (returns `false`). All methods are available in every binding except Java/Kotlin (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++); the JVM bindings don't expose these lifecycle methods yet — call the `honker_scheduler_*` SQL functions there instead.
 
 ### Bounded recurrence ("run N times then stop")
 
@@ -261,7 +262,7 @@ def snapshot():
     take_snapshot()
     count = increment_counter()  # your own table
     if count >= 10:
-        db.scheduler.remove("snapshot")
+        honker.Scheduler(db).remove("snapshot")
 ```
 
 This matches what pg-boss does on the Postgres side.
@@ -274,7 +275,7 @@ This is binding-agnostic: a Python scheduler on one host and a Go scheduler on a
 
 ## Missed-boundary catch-up
 
-If the scheduler was down across multiple boundaries, the next tick walks forward and fires each missed boundary. Good for low-frequency schedules like "fire once per hour for the last 6 hours." For high-frequency schedules where catch-up is unwanted, set `expires_s=` so stale jobs drop out of the claim window.
+If the scheduler was down across multiple boundaries, the next tick walks forward and fires each missed boundary. Good for low-frequency schedules like "fire once per hour for the last 6 hours." For high-frequency schedules where catch-up is unwanted, set `expires=` so stale jobs drop out of the claim window.
 
 ## Schedule syntax
 

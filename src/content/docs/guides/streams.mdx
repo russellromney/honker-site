@@ -258,18 +258,27 @@ async for event in s.subscribe(
 ):
     with db.transaction() as tx:
         apply_to_read_model(event.payload, tx=tx)
-        s.save_offset("invariant-writer", event.offset, tx=tx)
+        # Stream.save_offset has no tx parameter; use the extension
+        # function directly so the offset lands in the same transaction.
+        tx.query(
+            "SELECT honker_stream_save_offset(?, ?, ?)",
+            ["invariant-writer", s.name, event.offset],
+        )
 ```
 
-Other bindings do the same by passing the `tx` handle into `save_offset`. The extension-level SQL calls (`honker_stream_save_offset`) already run inside whatever transaction is open, so this pattern works uniformly across languages.
+(Calling `s.save_offset("invariant-writer", event.offset)` without `tx=` also works, but it commits outside your transaction and the atomicity is lost.)
+
+Other bindings pass the `tx` handle into their own save-offset call, or run `honker_stream_save_offset` inside the open transaction the same way — the extension-level SQL runs inside whatever transaction is open.
 
 ## Replay semantics
 
+These options are Python-only — `Stream.subscribe(consumer=..., from_offset=...)`. In Node and Bun the signature is `subscribe(consumer, opts)`; calling it with no consumer crashes, and there is no `from_offset` argument.
+
 - `subscribe(consumer=name)` starts from the saved offset for this consumer (0 if never saved).
 - `subscribe(from_offset=N)` starts after offset N, regardless of any saved offset.
-- `subscribe()` starts from the current `MAX(offset)` for live-tail with no replay.
+- `subscribe()` with no arguments replays from offset 0 — a full replay of the topic. There is no live-tail-from-now mode in Python.
 
 ## Where it lives
 
-- `_honker_stream` is the append-only event log. A `(topic, offset)` partial index keeps reads O(log n) even with millions of historical events.
+- `_honker_stream` is the append-only event log. A `(topic, offset)` index keeps reads O(log n) even with millions of historical events.
 - `_honker_stream_consumers` stores `(name, topic) -> offset`. One row per consumer per topic.

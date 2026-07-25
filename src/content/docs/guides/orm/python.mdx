@@ -129,9 +129,9 @@ class TypedQueue(Generic[T]):
             },
         ).scalar_one()
 
-    def parse(self, raw: str) -> T:
-        """Worker-side: validate a job payload back into the model."""
-        return self.model.model_validate_json(raw)
+    def parse(self, raw: dict) -> T:
+        """Worker-side: validate a decoded job payload back into the model."""
+        return self.model.model_validate(raw)
 ```
 
 Usage:
