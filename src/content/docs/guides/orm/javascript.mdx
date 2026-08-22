@@ -229,7 +229,13 @@ await db.transaction().execute(async (tx) => {
 
 ## Prisma
 
-Prisma **currently can't load SQLite extensions.** Its SQLite build ships without `SQLITE_ENABLE_LOAD_EXTENSION` and its query engine doesn't expose the underlying connection. [Feature request #20271](https://github.com/prisma/prisma/issues/20271) tracks the ask.
+Prisma **still can't load SQLite extensions**, though the reason changed with Prisma 7.
+
+Prisma 7 requires a driver adapter — a `url` in the datasource block is no longer even accepted — and the official SQLite adapter, `@prisma/adapter-better-sqlite3`, drives the same `better-sqlite3` that loads extensions fine on its own. So the old explanation ("Prisma's SQLite build omits `SQLITE_ENABLE_LOAD_EXTENSION`") no longer applies.
+
+What blocks it now is narrower: the adapter takes better-sqlite3's `Options` but never hands you the `Database`, and it exposes no extension hook. Verified against `@prisma/adapter-better-sqlite3` 7.9.1 — `SELECT load_extension(?)` through `$queryRawUnsafe` is rejected, and `honker_bootstrap()` comes back `no such function`. [Feature request #20271](https://github.com/prisma/prisma/issues/20271) tracks the ask.
+
+Driver adapters are a public interface, so a custom adapter wrapping a `better-sqlite3` connection you opened and loaded yourself would work. That is a real amount of surface to implement and maintain, so the two options below are usually the better trade.
 
 Two ways forward:
 
