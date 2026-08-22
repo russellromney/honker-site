@@ -14,12 +14,20 @@ Go apps can load Honker once through a `mattn/go-sqlite3` driver variant. The sa
 ```go
 import (
     "database/sql"
+    "github.com/russellromney/honker/packages/honker-go"
     sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 func init() {
+    // Go modules can't ship a binary, so this reads
+    // HONKER_EXTENSION_PATH or finds the extension next to your binary.
+    // Download it from a release or build it from the repo.
+    extPath, err := honker.ExtensionPath()
+    if err != nil {
+        log.Fatal(err)
+    }
     sql.Register("sqlite3_honker", &sqlite3.SQLiteDriver{
-        Extensions: []string{"/path/to/libhonker_ext"},
+        Extensions: []string{extPath},
     })
 }
 

@@ -12,6 +12,7 @@ SQLModel's `Session` inherits from SQLAlchemy's, so the wiring is identical for 
 ### Load the extension
 
 ```python
+import honker
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
@@ -19,10 +20,11 @@ engine = create_engine("sqlite:///app.db")
 
 @event.listens_for(engine, "connect")
 def _load_honker(conn, _):
-    conn.enable_load_extension(True)
-    conn.load_extension("/path/to/libhonker_ext")
+    honker.load_extension(conn)
     conn.execute("SELECT honker_bootstrap()")
 ```
+
+`honker.load_extension()` finds the extension bundled in the wheel and runs the `enable_load_extension` toggle around the load, so the toggle can't be left on. `honker.extension_info()` returns the same path and its entrypoint if you'd rather load it yourself.
 
 Python's stdlib `sqlite3` must be built with `SQLITE_ENABLE_LOAD_EXTENSION`. Homebrew Python and most Linux distros have it on; the python.org macOS installer does not. Check with `hasattr(sqlite3.connect(":memory:"), "enable_load_extension")`.
 
@@ -194,8 +196,7 @@ def _load_honker(sender, connection, **kwargs):
     if connection.vendor != "sqlite":
         return
     raw = connection.connection  # underlying sqlite3.Connection
-    raw.enable_load_extension(True)
-    raw.load_extension("/path/to/libhonker_ext")
+    honker.load_extension(raw)
     raw.execute("SELECT honker_bootstrap()")
 ```
 

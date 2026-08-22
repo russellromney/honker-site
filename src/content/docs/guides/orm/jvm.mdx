@@ -23,7 +23,8 @@ config.enableLoadExtension(true);
 var props = config.toProperties();
 try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:app.db", props);
      var stmt = conn.createStatement()) {
-    stmt.execute("SELECT load_extension('/absolute/path/to/libhonker_ext.dylib')");
+    stmt.execute("SELECT load_extension('" + HonkerExtension.path() + "', '"
+        + HonkerExtension.entrypoint() + "')");
     stmt.execute("SELECT honker_bootstrap()");
 }
 ```

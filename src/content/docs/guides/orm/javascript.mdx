@@ -13,12 +13,16 @@ The same recipe works for `bun:sqlite` — both expose `db.loadExtension(path)` 
 
 ```js
 const Database = require('better-sqlite3');
-// or: import { Database } from 'bun:sqlite';
+const { extensionPath } = require('@russellthehippo/honker-node/extension');
+// Bun: import { Database } from 'bun:sqlite';
+//      import { extensionPath } from '@russellthehippo/honker-bun';
 
 const db = new Database('app.db');
-db.loadExtension('/path/to/libhonker_ext');
+db.loadExtension(extensionPath());
 db.prepare('SELECT honker_bootstrap()').run();
 ```
+
+`better-sqlite3` binds every JavaScript number as SQLite `REAL`, whole ones included, so job ids and options like `priority` arrive as `REAL`. The `honker_*` functions accept that and coerce whole values to integers, so plain numbers work — no `CAST` or `BigInt` needed. A number with a fractional part is still an error rather than being rounded.
 
 ### Wrapper
 
@@ -87,9 +91,10 @@ Drizzle's SQLite driver sits on top of `better-sqlite3`, so you reach through to
 ```ts
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { extensionPath } from '@russellthehippo/honker-node/extension';
 
 const sqlite = new Database('app.db');
-sqlite.loadExtension('/path/to/libhonker_ext');
+sqlite.loadExtension(extensionPath());
 sqlite.prepare('SELECT honker_bootstrap()').run();
 
 export const db = drizzle(sqlite);
@@ -165,9 +170,10 @@ Kysely wraps `better-sqlite3` the same way Drizzle does.
 ```ts
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
+import { extensionPath } from '@russellthehippo/honker-node/extension';
 
 const sqlite = new Database('app.db');
-sqlite.loadExtension('/path/to/libhonker_ext');
+sqlite.loadExtension(extensionPath());
 sqlite.prepare('SELECT honker_bootstrap()').run();
 
 export const db = new Kysely<DB>({ dialect: new SqliteDialect({ database: sqlite }) });

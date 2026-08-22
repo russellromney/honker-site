@@ -29,8 +29,14 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 use std::str::FromStr;
 
+// The Rust crate links honker-core directly, so it has no bundled .so
+// to point at. Build the extension with
+// `cargo build --release -p honker-extension`, or download it from a
+// release: https://github.com/russellromney/honker/releases
+let ext = std::env::var("HONKER_EXTENSION_PATH")?;
+
 let opts = SqliteConnectOptions::from_str("sqlite://app.db")?
-    .extension("/path/to/libhonker_ext");
+    .extension(ext);
 
 let mut conn = opts.connect().await?;
 conn.execute("SELECT honker_bootstrap()").await?;
