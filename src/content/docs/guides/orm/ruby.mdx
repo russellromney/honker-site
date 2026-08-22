@@ -17,7 +17,7 @@ default: &default
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
   timeout: 5000
   extensions:
-    - /path/to/libhonker_ext
+    - <%= Honker.extension_path %>
 
 development:
   <<: *default

@@ -20,7 +20,7 @@ Requires Python 3.11+. The wheel bundles the Rust cdylib so you don't need a sep
 npm install @russellthehippo/honker-node
 ```
 
-Requires Node 20+. The `.node` native binary is built per-platform by the release workflow. No separate extension download needed on supported targets (macOS arm64/x86_64, Linux x86_64/aarch64).
+Requires Node 20+. The `.node` native binary is built per-platform by the release workflow, so `honker.open()` needs no separate extension download on supported targets (macOS arm64/x86_64, Linux x86_64/aarch64). To load Honker onto your own better-sqlite3 or Drizzle connection instead, use the loadable extension — it installs alongside as an optional dependency and `require('@russellthehippo/honker-node/extension').extensionPath()` returns its path. No Windows or musl target yet.
   </TabItem>
   <TabItem label="Rust">
 ```toml
@@ -37,7 +37,7 @@ The `honker` crate pulls in `honker-core` and `honker-extension`. SQLite is vend
 go get github.com/russellromney/honker-go
 ```
 
-Requires Go 1.25+. The Go binding calls into the extension via `mattn/go-sqlite3`, so you also need the compiled `libhonker_ext.{dylib,so,dll}` on disk. Grab it from the release page or build it yourself (see the SQLite extension tab).
+Requires Go 1.25+. The Go binding calls into the extension via `mattn/go-sqlite3`, so you also need the compiled `libhonker_ext.{dylib,so,dll}` on disk — Go modules can't ship a binary. Download it from a [release](https://github.com/russellromney/honker/releases) or build it yourself (see the SQLite extension tab), then point `HONKER_EXTENSION_PATH` at it and call `honker.ExtensionPath()`.
   </TabItem>
   <TabItem label="Ruby">
 ```ruby
@@ -56,7 +56,7 @@ Requires Ruby 3.0+. Uses the `sqlite3` gem under the hood. As with Go, Ruby poin
 bun add @russellthehippo/honker-bun
 ```
 
-Requires Bun 1.3+. Uses `bun:sqlite` and loads the extension from `./libhonker_ext.{dylib,so}`. Prebuilt extension binaries are attached to each GitHub release.
+Requires Bun 1.3+. Uses `bun:sqlite`. The extension installs automatically as an optional dependency; `extensionPath()` returns its location. macOS (arm64, x64) and Linux (x64, arm64, glibc) are prebuilt — no Windows or musl target yet.
   </TabItem>
   <TabItem label="Elixir">
 ```elixir
@@ -70,7 +70,7 @@ end
 mix deps.get
 ```
 
-Requires Elixir 1.17+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path.
+Requires Elixir 1.17+ and Erlang/OTP 26+. Uses `exqlite` for the SQLite FFI and loads the extension from a configured path. Hex can't ship a binary, so download it from a [release](https://github.com/russellromney/honker/releases) or build it, then use `Honker.Extension.path!/0`.
   </TabItem>
   <TabItem label=".NET">
 ```bash
@@ -113,7 +113,9 @@ zig build
 Requires Zig 0.15+, a C++17 compiler, and SQLite 3.9+ with extension loading. On macOS use Homebrew's `sqlite3` (Apple's system build omits `load_extension`). Link against the built `libhonker_cpp.a` static library and include `include/honker.hpp`.
   </TabItem>
   <TabItem label="SQLite extension">
-Build from source. It's one crate:
+Download `libhonker_ext` for your platform from a [release](https://github.com/russellromney/honker/releases) — macOS (arm64, x64), Linux (x64, arm64), and Windows (x64), with `SHA256SUMS` alongside.
+
+Or build it. It's one crate:
 
 ```bash
 git clone https://github.com/russellromney/honker
@@ -122,7 +124,9 @@ cargo build --release -p honker-extension
 # → target/release/libhonker_ext.{dylib,so}
 ```
 
-Works with any SQLite 3.9+ client: `sqlite3` CLI, `better-sqlite3`, `rusqlite`, Go's `mattn/go-sqlite3`, Ruby's `sqlite3` gem, Elixir's `exqlite`, and so on. Prebuilt release artifacts for macOS and Linux are attached to each GitHub release.
+Works with any SQLite 3.9+ client: `sqlite3` CLI, `better-sqlite3`, `rusqlite`, Go's `mattn/go-sqlite3`, Ruby's `sqlite3` gem, Elixir's `exqlite`, and so on.
+
+Most bindings ship it for you and can tell you where it is — see [binding support](https://github.com/russellromney/honker/blob/main/BINDINGS.md). Keep the `libhonker_ext` name: SQLite derives the entrypoint from the filename, so a rename means passing `sqlite3_honkerext_init` explicitly.
   </TabItem>
 </Tabs>
 

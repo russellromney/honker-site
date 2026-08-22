@@ -23,7 +23,8 @@ config.enableLoadExtension(true);
 var props = config.toProperties();
 try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:app.db", props);
      var stmt = conn.createStatement()) {
-    stmt.execute("SELECT load_extension('/absolute/path/to/libhonker_ext.dylib')");
+    stmt.execute("SELECT load_extension('" + HonkerExtension.path() + "', '"
+        + HonkerExtension.entrypoint() + "')");
     stmt.execute("SELECT honker_bootstrap()");
 }
 ```
@@ -119,6 +120,30 @@ ctx.transaction(configuration -> {
 ## Kotlin Exposed
 
 Exposed can call raw SQL inside `transaction { ... }`. Keep the helper boring.
+
+Connect through a connection factory, not the `url` + `driver` overload. That overload never sees the `SQLiteConfig` properties, so extension loading is still off when the connection opens and `load_extension` fails with `not authorized`.
+
+```kotlin
+import java.sql.DriverManager
+import org.jetbrains.exposed.sql.Database
+import org.sqlite.SQLiteConfig
+
+val props = SQLiteConfig().apply { enableLoadExtension(true) }.toProperties()
+
+Database.connect({
+    DriverManager.getConnection("jdbc:sqlite:app.db", props).also { conn ->
+        conn.createStatement().use { s ->
+            s.execute(
+                "SELECT load_extension('${HonkerExtension.path()}', " +
+                    "'${HonkerExtension.entrypoint()}')"
+            )
+            s.execute("SELECT honker_bootstrap()")
+        }
+    }
+})
+```
+
+Then the transaction body is just SQL:
 
 ```kotlin
 import org.jetbrains.exposed.sql.transactions.transaction

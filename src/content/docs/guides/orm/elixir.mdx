@@ -15,7 +15,7 @@ Ecto apps can load Honker through `exqlite`'s extension configuration. Keep your
 # config/config.exs
 config :my_app, MyApp.Repo,
   database: "app.db",
-  load_extensions: ["/path/to/libhonker_ext"]
+  load_extensions: [Honker.Extension.path!()]
 ```
 
 Run bootstrap once at app start:
