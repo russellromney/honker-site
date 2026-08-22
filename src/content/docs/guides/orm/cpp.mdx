@@ -5,6 +5,9 @@ description: "Use the C++ binding directly, or call Honker SQL functions through
 
 For C++ apps, the `honker-cpp` binding is intentionally thin. It loads the Honker SQLite extension, gives you RAII wrappers for queues and transactions, and exposes the raw `sqlite3*` when you need to integrate with code that already owns SQL statements.
 
+The C++ binding takes the extension path explicitly — it links `libhonker_cpp.a` but does not bundle the loadable extension. Download `honker-ext-<target>.tar.gz` from a [release](https://github.com/russellromney/honker/releases) and extract `libhonker_ext.{dylib,so}` from it, or build it with `cargo build --release -p honker-extension`. Keep the file name as-is: SQLite derives the extension entry point from it.
+
+
 ## Use the C++ binding directly
 
 ```cpp
