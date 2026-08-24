@@ -5,13 +5,26 @@ description: Use Honker from the JVM, including Maven install, Kotlin Flow helpe
 
 ## Install
 
+The JVM and Kotlin bindings are **not on Maven Central yet**. Build them from
+the repository and install into your local Maven repository:
+
+```bash
+git clone https://github.com/russellromney/honker
+cd honker
+cargo build --release -p honker-extension     # the loadable extension
+mvn -f packages/honker-jvm/pom.xml install
+mvn -f packages/honker-kotlin/pom.xml install   # only if you want the Kotlin helpers
+```
+
+Then depend on the installed artifacts.
+
 Java:
 
 ```xml
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
@@ -21,13 +34,18 @@ Kotlin:
 <dependency>
   <groupId>dev.honker</groupId>
   <artifactId>honker-kotlin</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
 The Java artifact is the runtime binding. The Kotlin artifact adds builder DSLs,
 typed extension helpers, coroutine `Flow` wrappers, and suspending task-result
 helpers over that same runtime.
+
+If you would rather not build anything, the JVM can use Honker as a plain SQLite
+extension over JDBC instead — download it from
+[the latest release](https://github.com/russellromney/honker/releases/latest) and
+follow the [JVM ORM guide](/guides/orm/jvm/). That path needs no Maven install.
 
 ## Open
 
