@@ -1,11 +1,16 @@
-name: Deploy honker.dev
+name: Build honker.dev
 
-# Builds the Astro Starlight site and deploys to Cloudflare Pages
-# via wrangler. Production on main; PRs get preview URLs.
+# Build check only. This workflow does NOT deploy.
 #
-# Requires repo secrets:
-#   CLOUDFLARE_API_TOKEN   - scope: Pages Edit, account: honker
-#   CLOUDFLARE_ACCOUNT_ID  - the account ID from `wrangler whoami`
+# Deploying needs a Cloudflare API token with Pages Edit, and we
+# deliberately do not keep one in this repository's secrets. Publishing
+# is a local step instead, against a wrangler OAuth login:
+#
+#     npm run deploy          # production -> honker.dev
+#
+# See README.md. What CI is for here is catching a site that does not
+# build — broken MDX, a bad import, a dead component — before it is
+# merged, which is the failure that actually reaches a reader.
 
 on:
   push:
@@ -17,13 +22,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      deployments: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,13 +37,3 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
-      - name: Deploy to Cloudflare Pages
-        if: github.event_name != 'pull_request'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: |
-            pages deploy dist
-            --project-name=honker
-            --branch=${{ github.head_ref || github.ref_name }}
