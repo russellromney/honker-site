@@ -1,9 +1,9 @@
 ---
 title: Rust ORM integration
-description: Prefer the native honker crate for new Rust apps, or wire Honker into an existing sqlx SQLite stack.
+description: Prefer the native honker crate for new Rust apps, or wire Honker into sqlx, SeaORM, or Diesel.
 ---
 
-For new Rust code, the native `honker` crate is the clean path. If you already have a sqlx app, load the SQLite extension and call the same `honker_*` functions inside your existing executors and transactions.
+For new Rust code, the native `honker` crate is the clean path. If you already have a sqlx, SeaORM, or Diesel app, load the SQLite extension and call the same `honker_*` functions inside your existing executors and transactions.
 
 ## Rust: use the `honker` crate
 
@@ -17,7 +17,9 @@ let q = db.queue("emails", Default::default());
 q.enqueue(&serde_json::json!({"to": "alice@example.com"}), Default::default())?;
 ```
 
-See the [Getting Started guide](/getting-started/) (Rust tab) for the full native API. Use sqlx below only if you're retrofitting into an existing sqlx-based codebase.
+See the [Getting Started guide](/getting-started/) (Rust tab) for the full native API. Use the recipes below only if you're retrofitting into an existing ORM codebase.
+
+The Rust crate links honker-core directly, so it has no bundled `.so` to point at. Build the extension with `cargo build --release -p honker-extension`, or download it from a [release](https://github.com/russellromney/honker/releases).
 
 
 ## sqlx
@@ -29,10 +31,6 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 use std::str::FromStr;
 
-// The Rust crate links honker-core directly, so it has no bundled .so
-// to point at. Build the extension with
-// `cargo build --release -p honker-extension`, or download it from a
-// release: https://github.com/russellromney/honker/releases
 let ext = std::env::var("HONKER_EXTENSION_PATH")?;
 
 let opts = SqliteConnectOptions::from_str("sqlite://app.db")?
@@ -103,3 +101,129 @@ where
 ```
 
 `SqliteExecutor<'e>` is sqlx's "anything you can run a query against" — satisfied by `&SqlitePool`, `&mut SqliteConnection`, and `&mut Transaction<'_, Sqlite>`, so one helper serves transactional and non-transactional callers.
+
+
+## SeaORM
+
+SeaORM sits on sqlx. Load the extension through `ConnectOptions::map_sqlx_sqlite_opts`, then call `honker_*` with `Statement::from_sql_and_values` inside a SeaORM transaction.
+
+```rust
+use sea_orm::{
+    ConnectOptions, ConnectionTrait, Database, DbBackend, Statement, TransactionTrait,
+};
+
+let ext = std::env::var("HONKER_EXTENSION_PATH")?;
+let mut opt = ConnectOptions::new("sqlite://app.db?mode=rwc");
+opt.map_sqlx_sqlite_opts(move |opts| unsafe { opts.extension(ext.clone()) });
+let db = Database::connect(opt).await?;
+db.execute_unprepared("SELECT honker_bootstrap()").await?;
+```
+
+```rust
+db.transaction::<_, (), sea_orm::DbErr>(|txn| {
+    Box::pin(async move {
+        txn.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "INSERT INTO orders (id, user_id) VALUES (?, ?)",
+            [42i32.into(), 1i32.into()],
+        )).await?;
+        txn.query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)",
+            [
+                "emails".into(),
+                r#"{"order_id":42}"#.into(),
+                0i64.into(),
+                3i64.into(),
+            ],
+        )).await?;
+        Ok(())
+    })
+}).await?;
+```
+
+
+## Diesel
+
+Diesel 2.3 does not expose its raw SQLite connection or wrap `sqlite3_load_extension`. At process startup, temporarily register Honker's entry point with SQLite's `sqlite3_auto_extension`, establish the Diesel connection, then cancel the registration. Keep the loaded library alive for at least as long as the connection.
+
+Add `libloading = "0.9"` and `libsqlite3-sys = "0.38"` alongside Diesel's `sqlite` feature. Call this before starting other threads or opening any other SQLite connections: auto-extension registration is process-global during the short window around `establish`.
+
+```rust
+use diesel::prelude::*;
+use diesel::sql_query;
+use diesel::sqlite::SqliteConnection;
+use libloading::Library;
+use std::os::raw::{c_char, c_int};
+
+type ExtensionInit = unsafe extern "C" fn(
+    *mut libsqlite3_sys::sqlite3,
+    *mut *mut c_char,
+    *const libsqlite3_sys::sqlite3_api_routines,
+) -> c_int;
+
+fn open_honker(
+    database_url: &str,
+    extension_path: &str,
+) -> Result<(SqliteConnection, Library), Box<dyn std::error::Error>> {
+    let library = unsafe { Library::new(extension_path)? };
+    let init: ExtensionInit = unsafe {
+        *library.get(b"sqlite3_honkerext_init")?
+    };
+    let rc = unsafe { libsqlite3_sys::sqlite3_auto_extension(Some(init)) };
+    if rc != libsqlite3_sys::SQLITE_OK {
+        return Err(format!("sqlite3_auto_extension failed: {rc}").into());
+    }
+
+    let connection = SqliteConnection::establish(database_url);
+    unsafe { libsqlite3_sys::sqlite3_cancel_auto_extension(Some(init)) };
+    Ok((connection?, library))
+}
+
+let (mut conn, _honker_library) = open_honker(
+    "app.db",
+    &std::env::var("HONKER_EXTENSION_PATH")?,
+)?;
+sql_query("SELECT honker_bootstrap()").execute(&mut conn)?;
+```
+
+Apple's system SQLite disables `sqlite3_auto_extension`. On macOS, link both Diesel and the Honker extension against the same upstream SQLite (for example Homebrew SQLite):
+
+```bash
+export LIBSQLITE3_SYS_USE_PKG_CONFIG=1
+export PKG_CONFIG_PATH="$(brew --prefix sqlite)/lib/pkgconfig"
+cargo build
+```
+
+```rust
+use diesel::sql_types::{BigInt, Integer, Text};
+
+#[derive(QueryableByName)]
+struct IdRow {
+    #[diesel(sql_type = BigInt)]
+    id: i64,
+}
+
+conn.transaction(|conn| {
+    sql_query("INSERT INTO orders (id, user_id) VALUES (?, ?)")
+        .bind::<Integer, _>(42)
+        .bind::<Integer, _>(1)
+        .execute(conn)?;
+    sql_query("SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL) AS id")
+        .bind::<Text, _>("emails")
+        .bind::<Text, _>(r#"{"order_id":42}"#)
+        .bind::<BigInt, _>(0_i64)
+        .bind::<BigInt, _>(3_i64)
+        .get_result::<IdRow>(conn)?;
+    diesel::result::QueryResult::Ok(())
+})?;
+```
+
+
+## Toasty
+
+[Toasty](https://github.com/tokio-rs/toasty) is Tokio's async ORM (~3k GitHub stars, crates.io since 2026). Its SQLite driver is rusqlite and it has a raw SQL API (`toasty::sql::query` / `statement`) that runs inside Toasty transactions.
+
+It does **not** expose rusqlite's `load_extension`, and it does not run `sqlite3_enable_load_extension` on connect. `SELECT load_extension(...)` through Toasty raw SQL comes back `not authorized`. There is no connection-factory hook analogous to sqlx `.extension()` or SeaORM `map_sqlx_sqlite_opts`.
+
+Until Toasty can load a SQLite extension onto the connection it owns, Honker cannot join a Toasty transaction. Use sqlx, SeaORM, Diesel, or the native `honker` crate. If/when Toasty ships an extension hook, this section will become a recipe.
