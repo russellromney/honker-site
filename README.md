@@ -32,6 +32,11 @@ Then point `honker.dev` at the Pages project in the Cloudflare dashboard
 
 ### Regular deploys
 
+Deploys are manual on purpose. CI builds the site to catch breakage but
+does not publish: that would mean keeping a Cloudflare API token in this
+repo's secrets, and we would rather deploy from a local `wrangler login`.
+
+
 ```bash
 npm run deploy              # production → honker.dev
 npm run deploy:preview      # preview → <hash>.honker.pages.dev
