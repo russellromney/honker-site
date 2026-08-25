@@ -1,22 +1,23 @@
 {
   "languages": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
-  "guideCoverage": {
-    "guides/queues.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
-    "guides/streams.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
-    "guides/pubsub.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
-    "guides/scheduler.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"]
+  "guideSections": {
+    "guides/queues.mdx": { "Enqueue": "all", "Claim and ack": "all" },
+    "guides/streams.mdx": { "Publish": "all", "Consume and checkpoint": "all" },
+    "guides/pubsub.mdx": { "Fire a signal": "all", "Listen": "listen:high-level" },
+    "guides/scheduler.mdx": { "Register a task": "all" },
+    "guides/tasks.mdx": { "Define, enqueue, and run": "functionTasks" }
   },
   "capabilities": {
-    "Python": { "functionTasks": "decorators-registry-cli-periodic", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
-    "Node": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": false },
-    "Rust": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": false },
-    "Go": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false },
-    "Ruby": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": "age-only", "streamFromOffset": false },
-    "Bun": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false },
-    "Elixir": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": "age-only", "streamFromOffset": false },
-    ".NET": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
-    "Java": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
-    "Kotlin": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
-    "C++": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false }
+    "Python": { "functionTasks": "decorators-registry-cli-periodic", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "`from_offset`", "consumerOptional": "yes" }, "streamOffsetTx": "sql" },
+    "Node": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "no", "consumerOptional": "no" }, "streamOffsetTx": "typed" },
+    "Rust": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "no", "consumerOptional": "no" }, "streamOffsetTx": "typed" },
+    "Go": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": false, "maxCount": false }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "no", "consumerOptional": "no" }, "streamOffsetTx": "typed" },
+    "Ruby": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": { "age": true, "maxCount": false }, "streamSubscription": { "savedOffset": "manual read/save APIs", "explicitStart": "pass offset to read API", "consumerOptional": "n/a" }, "streamOffsetTx": "typed" },
+    "Bun": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": false, "maxCount": false }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "no", "consumerOptional": "no" }, "streamOffsetTx": "typed" },
+    "Elixir": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": { "age": true, "maxCount": false }, "streamSubscription": { "savedOffset": "manual read/save APIs", "explicitStart": "pass offset to read API", "consumerOptional": "n/a" }, "streamOffsetTx": "typed" },
+    ".NET": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "`fromOffset`", "consumerOptional": "yes" }, "streamOffsetTx": "typed" },
+    "Java": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "`SubscribeOptions.fromOffset`", "consumerOptional": "yes" }, "streamOffsetTx": "sql" },
+    "Kotlin": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": { "age": true, "maxCount": true }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "`SubscribeOptions.fromOffset`", "consumerOptional": "yes" }, "streamOffsetTx": "sql" },
+    "C++": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": { "age": false, "maxCount": false }, "streamSubscription": { "savedOffset": "yes", "explicitStart": "no", "consumerOptional": "no" }, "streamOffsetTx": "typed" }
   }
 }

@@ -38,9 +38,9 @@ Subscriber count does not create more poll threads.
 
 ## Idle Cost
 
-The current update watcher uses `PRAGMA data_version`. The Rust microbench
-measures roughly 3.5 us per poll on reference hardware. At 1 kHz that is
-about 3.5 ms of CPU per second per open database handle, before any real
+The current update watcher uses `PRAGMA data_version`. The standalone Rust
+microbench measures roughly 2.0 us per poll on reference hardware. At 1 kHz
+that is about 2.0 ms of CPU per second per open database handle, before any real
 work happens. That is small enough to keep the boring implementation.
 
 There is a faster experimental shm reader in `bench/wal_index_methods`,

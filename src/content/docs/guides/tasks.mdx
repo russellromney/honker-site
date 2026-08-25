@@ -38,6 +38,8 @@ def send_email(to: str, subject: str) -> dict:
     return {"sent_at": time.time()}
 
 result = send_email("alice@example.com", "Hi")
+# Run `python -m honker worker myapp.tasks:db --queue=default`
+# in another process before waiting for the result.
 value = result.get(timeout=10)  # Or: await result.aget(timeout=10)
 ```
 
@@ -136,9 +138,9 @@ Otherwise, keep a handler registered under the old name until old jobs have drai
 
 ## Defaults
 
-Python and JVM tasks default to stored results with a one-hour TTL, three attempts, and a 60-second retry delay. Override them with Python decorator arguments or JVM `TaskOptions`. Python additionally supports `timeout_s`; JVM task handlers do not have an equivalent task-level timeout option.
+Python `@task` and JVM registered tasks default to stored results with a one-hour TTL, three attempts, and a 60-second retry delay. Override them with Python decorator arguments or JVM `TaskOptions`. Python additionally supports `timeout_s`; JVM task handlers do not have an equivalent task-level timeout option. Python `@periodic_task` is the exception: result storage defaults off.
 
-Arguments and return values must be JSON-compatible. Unknown task names and malformed task envelopes go to the dead-letter table.
+Arguments and return values must be JSON-compatible. Raw payloads on a task-worker queue and unknown task names go to the dead-letter table. Malformed JSON/envelopes are not a portable task-layer contract; validate custom producers before relying on their failure behavior.
 
 ## Periodic tasks (Python only)
 
@@ -159,7 +161,7 @@ def heartbeat():
 ## What's stored where
 
 - `_honker_live` — pending and in-flight task envelopes.
-- `_honker_dead` — exhausted retries, unknown tasks, malformed envelopes, and explicit failures.
+- `_honker_dead` — exhausted retries, raw task-queue payloads, unknown tasks, and explicit failures.
 - `_honker_results` — return values keyed by job id.
 - `_honker_scheduler_tasks` — scheduler registrations, including Python periodic tasks.
 

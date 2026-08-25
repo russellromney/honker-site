@@ -50,6 +50,7 @@ def send_email(to):
     return {"sent": True, "to": to}
 
 result = send_email("alice@example.com")
+# In another process: python -m honker worker myapp.tasks:db --queue=emails
 print(result.get(timeout=10))
 ```
 

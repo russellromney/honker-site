@@ -85,7 +85,7 @@ Honker.notify(db, "orders", %{id: 42, event: "placed"})
 using Honker;
 
 using var db = Database.Open("app.db");
-db.Notify("orders", new { id = 42, eventName = "placed" });
+db.Notify("orders", new { id = 42, @event = "placed" });
 
 // Or call tx.Notify(...) inside a Honker transaction.
 ```

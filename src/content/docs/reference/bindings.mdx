@@ -65,6 +65,10 @@ typed helper or the shared extension SQL.
   permissions or CDN weirdness.
 - Every possible cross-language pair. CI proves representative pairs
   and shared table behavior. It does not run N x N interop.
+- Cross-binding named-consumer checkpoints involving Node. The current Node
+  wrapper reverses the topic and consumer arguments at its stream-offset SQL
+  boundary; Node resume is internally consistent, but another binding will not
+  see the same saved checkpoint.
 - Long soak on every OS. The scary nightly workflow soaks Linux; PR CI
   stays shorter.
 - Ruby and Elixir expose notifications and update-waiting without
