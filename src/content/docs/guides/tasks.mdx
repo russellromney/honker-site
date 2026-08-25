@@ -1,118 +1,166 @@
 ---
-title: Tasks (decorators)
-description: Huey-style @task decorators on top of honker queues.
+title: Function tasks
+description: Python decorators and explicit Java/Kotlin registries on top of honker queues.
 ---
 
-Decorators let you write queue code that looks synchronous:
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
+Function tasks add named handler dispatch and stored results on top of Honker queues. The convenience API is not identical in every binding:
+
+| Binding | Function-task API |
+| --- | --- |
+| Python | Decorators, in-process workers, worker CLI, and periodic-task decorator |
+| Java | Explicit `TaskRegistry`, `TaskHandle`, `runTasks`, and result handles |
+| Kotlin | Kotlin registry helpers over the Java task runtime |
+| Node, Rust, Go, Ruby, Bun, Elixir, .NET, C++ | Queue and result primitives; no function-task registry/dispatcher |
+
+All task-capable bindings store the same queue envelope:
+
+```json
+{"__honker_task__":{"task":"send-email","args":["alice@example.com","Hi"],"kwargs":{}}}
+```
+
+That makes the storage format portable. Run each queued task with a worker whose registry contains the named handler. Cross-language handler dispatch is not yet covered by Honker's compatibility tests, so keep producers and task workers on the same task API unless you test that combination yourself.
+
+## Define, enqueue, and run
+
+<Tabs syncKey="language">
+  <TabItem label="Python">
 ```python
 import time
-
 import honker
 
 db = honker.open("app.db")
 q = db.queue("default")
 
-@q.task(retries=3, timeout_s=30)
+@q.task(name="send-email", retries=3, timeout_s=30)
 def send_email(to: str, subject: str) -> dict:
-    ...
     return {"sent_at": time.time()}
 
-# Caller side
-r = send_email("alice@example.com", "Hi")   # enqueues, returns TaskResult
-r.get(timeout=10)                            # blocks until worker finishes
-# Or: await r.aget(timeout=10)
+result = send_email("alice@example.com", "Hi")
+value = result.get(timeout=10)  # Or: await result.aget(timeout=10)
 ```
 
-Calling `send_email(...)` does NOT run the function. It JSON-encodes the args into a job payload, enqueues on the `default` queue, and returns a `TaskResult` wrapping the job id.
+Calling `send_email(...)` enqueues the call and returns a `TaskResult`; it does not run the function in the caller.
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+import java.time.Duration;
 
-A worker picks it up, runs the original function, stores the return value. The caller's `r.get()` reads that stored value when the worker is done.
+Database db = Honker.open("app.db");
+TaskRegistry registry = new TaskRegistry(db);
+TaskHandle sendEmail = registry.register(
+    "send-email",
+    "default",
+    call -> "{\"sent\":true}"
+);
 
-## Auto-naming and the rename footgun
+TaskResult result = sendEmail.enqueue(
+    "[\"alice@example.com\",\"Hi\"]",
+    "{}"
+);
 
-The default task name is `f"{fn.__module__}.{fn.__qualname__}"` — matches Huey/Celery.
+try (TaskWorkerHandle worker = db.runTasks(registry)) {
+    String value = result.waitFor(
+        WaitOptions.timeout(Duration.ofSeconds(10))
+    );
+}
+```
 
-If you rename the function, old jobs still reference the old name. They'll dead-letter with `unknown task: myapp.send_email`. Two safe-rename patterns:
+Java deliberately uses explicit registration. The core does not scan annotations.
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.*
+import java.time.Duration
+import kotlinx.coroutines.runBlocking
 
-1. **Explicit name from day one**: `@q.task(name="send-email")`. Rename the Python function freely; the task name is stable.
-2. **Stub the old name**: keep a wrapper under the old `@q.task(name="myapp.old_name")` that calls the new function.
+runBlocking {
+    honker("app.db").use { db ->
+        val registry = db.taskRegistry()
+        val sendEmail = registry.registerJson(
+            "send-email",
+            "default"
+        ) { call -> """{"sent":true}""" }
 
-Docs recommend pattern 1.
+        val result = sendEmail.enqueueJson(
+            """["alice@example.com","Hi"]"""
+        )
 
-## Worker
+        db.runTasks(registry).use {
+            val value = result.await(Duration.ofSeconds(10))
+        }
+    }
+}
+```
 
-The worker loop dispatches by name via a process-global registry. Two ways to run it:
+Kotlin adds builder, coroutine, and JSON helpers while using the Java registry and worker runtime.
+  </TabItem>
+</Tabs>
 
-### CLI
+## Python worker options
+
+Python's decorator registry is process-global. Import the module containing the decorated functions before starting a worker.
+
+### CLI (Python only)
 
 ```bash
 python -m honker worker myapp.tasks:db --queue=default --concurrency=4
 ```
 
-The positional argument is an import path (`myapp.tasks`) followed by `:variable_name` — `db` is the `honker.Database` instance. Importing that module fires the `@q.task()` decorators as a side effect, populating the registry.
+The positional argument is an import path followed by `:variable_name`. Useful flags are `--queue NAME` (repeatable), `--concurrency N`, and `--list`.
 
-Flags:
-- `--queue NAME` — repeat to drain multiple queues. Default: every queue with registered tasks.
-- `--concurrency N` — workers per queue. Default: `os.cpu_count()`.
-- `--list` — print registered tasks and exit.
-
-### In-process
-
-For embedding a worker inside an existing async process (FastAPI lifespan, a long-running script):
+### In-process (Python only)
 
 ```python
 import asyncio
-import honker
 
-db = honker.open("app.db")
-
-# ... @q.task-decorated functions imported and registered here ...
-
+# Import the modules containing @q.task functions first.
 asyncio.run(db.run_workers(concurrency=4))
 ```
 
-`db.run_workers` blocks until the passed `stop_event` is set or the task is cancelled.
+`db.run_workers` runs until its `stop_event` is set or the task is cancelled. Java and Kotlin instead keep the `TaskWorkerHandle` returned by `db.runTasks(...)` open for the worker lifetime.
+
+## Names and safe renames
+
+Python defaults to `f"{fn.__module__}.{fn.__qualname__}"`; Java and Kotlin require an explicit name. A queued job continues to reference the old name after a code rename, so prefer a stable explicit name from day one:
+
+```python
+@q.task(name="send-email")
+def send_email(...):
+    ...
+```
+
+Otherwise, keep a handler registered under the old name until old jobs have drained.
 
 ## Defaults
 
-- **Result storage: on, 1h TTL.** `r.get()` works out of the box. Pass `store_result=False` on a decorator for fire-and-forget tasks (logs, webhook posts, cleanup) to skip the extra INSERT.
-- **Retries: inherited from the queue's `max_attempts`.** Override per-task with `@q.task(retries=N)`.
-- **Retry delay: 60s.** Override with `retry_delay_s=`.
-- **Timeout: none.** `@q.task(timeout_s=30)` wraps the call in `asyncio.wait_for`. On timeout, the job retries with `timeout after 30s` as the error. For sync functions, the task dispatches onto a background thread so a blocking task doesn't freeze peer workers.
+Python and JVM tasks default to stored results with a one-hour TTL, three attempts, and a 60-second retry delay. Override them with Python decorator arguments or JVM `TaskOptions`. Python additionally supports `timeout_s`; JVM task handlers do not have an equivalent task-level timeout option.
 
-## Periodic tasks
+Arguments and return values must be JSON-compatible. Unknown task names and malformed task envelopes go to the dead-letter table.
+
+## Periodic tasks (Python only)
 
 ```python
 from honker import crontab, every_s
 
-@q.periodic_task(crontab("0 3 * * *"))
+@q.periodic_task(crontab("0 3 * * *"), name="nightly-backup")
 def nightly_backup():
     ...
 
-@q.periodic_task(every_s(1))
+@q.periodic_task(every_s(1), name="heartbeat")
 def heartbeat():
     ...
 ```
 
-Registers the function in the task registry AND in the scheduler. The scheduler enqueues a fixed payload (no args) on each schedule boundary; the worker picks it up and dispatches through the same decorator-task path.
-
-Same default-on-none / explicit-name pattern: `@q.periodic_task(crontab, name="nightly")` to stabilize the name.
-
-## Edge cases
-
-**Arguments must be JSON-serializable.** Raw ints, strs, floats, bools, None, lists, and dicts. Passing a `datetime` raises `TypeError` at enqueue time — honest, not silent garbage in the payload.
-
-**Unknown task names go to dead-letter** with `unknown task: foo.bar. Registered tasks: [...]` so the operator can see what the worker has vs. what was queued.
-
-**Sync task blocking the event loop.** A sync def is dispatched onto `asyncio.to_thread` — multiple sync tasks run in parallel threads, the event loop stays responsive.
-
-**Hot reload / same-function re-register.** Calling the decorator twice on the same function is idempotent. Registering two *different* functions under the same explicit `name=` raises at import time.
+`@periodic_task` registers both the function handler and a scheduler entry with an empty argument list. Java and Kotlin can combine their explicit task registry with the scheduler primitives, but do not provide periodic-task sugar.
 
 ## What's stored where
 
-- `_honker_live` — pending + in-flight job rows. Payload is a JSON envelope: `{"__honker_task__": {"task": "...", "args": [...], "kwargs": {...}}}`.
-- `_honker_dead` — exhausted retries + unknown tasks + explicit `.fail(...)` calls.
-- `_honker_results` — return values keyed by job id. Expires at `unixepoch() + result_ttl_s`.
-- `_honker_scheduler_tasks` — periodic task registrations (one row per decorated `@periodic_task`).
+- `_honker_live` — pending and in-flight task envelopes.
+- `_honker_dead` — exhausted retries, unknown tasks, malformed envelopes, and explicit failures.
+- `_honker_results` — return values keyed by job id.
+- `_honker_scheduler_tasks` — scheduler registrations, including Python periodic tasks.
 
 All tables share the same `.db` file as your business data.

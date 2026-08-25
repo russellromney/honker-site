@@ -328,7 +328,7 @@ SELECT honker_ack(1, 'worker-1');
 
 ## A proper worker
 
-The worker loop wakes within 1-2 ms when a new job lands, via a shared 1 ms `PRAGMA data_version` poll on the database. No application-level polling. (Two experimental alternatives — kernel filesystem events and mmap'd WAL-index reads — are available behind opt-in flags; see [Watcher backends](/reference/watcher-backends/).)
+The worker loop wakes in the low-single-digit milliseconds on reference hardware when a new job lands, via a shared 1 ms `PRAGMA data_version` poll on the database. Exact latency varies by binding, OS, and hardware; see [Benchmarks](/reference/benchmarks/). No application-level polling. (Two experimental alternatives — kernel filesystem events and mmap'd WAL-index reads — are available behind opt-in flags; see [Watcher backends](/reference/watcher-backends/).)
 
 <Tabs syncKey="language">
   <TabItem label="Python">
@@ -722,7 +722,7 @@ COMMIT;
 ## What's next
 
 - [Queues](/guides/queues/) for priority, delays, retries, dead-letter
-- [Tasks](/guides/tasks/) for Huey-style `@task` decorators (Python)
+- [Function tasks](/guides/tasks/) for Python decorators and explicit Java/Kotlin registries
 - [Streams](/guides/streams/) for durable pub/sub with per-consumer offsets
 - [Pub/Sub](/guides/pubsub/) for `pg_notify`-style ephemeral signals
 - [Scheduler](/guides/scheduler/) for cron and `@every` time-trigger tasks

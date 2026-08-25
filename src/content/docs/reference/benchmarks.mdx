@@ -4,7 +4,7 @@ description: Baseline Honker performance numbers and how to read them.
 ---
 
 Benchmarks are promises about shape, not universal numbers. Hardware,
-filesystem, SQLite version, Python version, and fsync settings matter.
+filesystem, SQLite version, binding runtime, and fsync settings matter.
 Use these as a sanity check for "same order of magnitude."
 
 Baseline: Apple Silicon M-series laptop, release build, WAL,
@@ -12,25 +12,25 @@ Baseline: Apple Silicon M-series laptop, release build, WAL,
 
 ## Queue
 
-| Operation | Baseline |
-|---|---:|
-| Enqueue, one job per transaction | 6,000 jobs/s |
-| Enqueue, 100 jobs per transaction | 110,000 jobs/s |
-| Claim + ack, one job | 3,700 jobs/s |
-| Claim batch + ack batch, batch 32 | 60,000 jobs/s |
-| Claim batch + ack batch, batch 128 | 80,000 jobs/s |
+| Operation | Binding/runtime | Baseline |
+|---|---|---:|
+| Enqueue, one job per transaction | Python | 6,000 jobs/s |
+| Enqueue, 100 jobs per transaction | Python | 110,000 jobs/s |
+| Claim + ack, one job | Python | 3,700 jobs/s |
+| Claim batch + ack batch, batch 32 | Python | 60,000 jobs/s |
+| Claim batch + ack batch, batch 128 | Python | 80,000 jobs/s |
 
 Single-job paths pay per-transaction fixed cost. Batch paths amortize
 SQLite writes and are the right shape for high-volume workers.
 
 ## Streams And Wake
 
-| Operation | Baseline |
-|---|---:|
-| Stream publish, one event per transaction | 5,800 events/s |
-| Stream replay from reader pool | 1,000,000 events/s |
-| Live stream end-to-end | p50 0.23 ms, p99 7 ms |
-| Cross-process notify/listen wake | about 2.9 ms p50 on Apple M1 Pro (500 samples) |
+| Operation | Binding/runtime | Baseline |
+|---|---|---:|
+| Stream publish, one event per transaction | Python | 5,800 events/s |
+| Stream replay from reader pool | Python | 1,000,000 events/s |
+| Live stream end-to-end | Python | p50 0.23 ms, p99 7 ms |
+| Cross-process notify/listen wake | Python | about 2.9 ms p50 on Apple M1 Pro (500 samples) |
 
 The wake path is one `PRAGMA data_version` read every 1 ms per open
 `Database`, fan-out to N subscribers, then a normal indexed `SELECT`.
@@ -38,7 +38,7 @@ Subscriber count does not create more poll threads.
 
 ## Idle Cost
 
-The current update watcher uses `PRAGMA data_version`. The microbench
+The current update watcher uses `PRAGMA data_version`. The Rust microbench
 measures roughly 3.5 us per poll on reference hardware. At 1 kHz that is
 about 3.5 ms of CPU per second per open database handle, before any real
 work happens. That is small enough to keep the boring implementation.

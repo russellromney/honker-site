@@ -105,6 +105,43 @@ Honker.Queue.enqueue(db, "emails", %{to: "alice@example.com"})
 Honker.Queue.enqueue(db, "emails", %{to: "bob@example.com"}, delay: 60)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var queue = db.Queue("emails");
+queue.Enqueue(new { to = "alice@example.com" });
+queue.Enqueue(new { to = "bob@example.com" }, new EnqueueOptions(DelaySeconds: 60));
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+import java.time.Duration;
+
+try (Database db = Honker.open("app.db")) {
+    Queue queue = db.queue("emails");
+    queue.enqueue("{\"to\":\"alice@example.com\"}");
+    queue.enqueue("{\"to\":\"bob@example.com\"}",
+        EnqueueOptions.builder().delay(Duration.ofSeconds(60)).build());
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.*
+import java.time.Duration
+
+honker("app.db").use { db ->
+    val queue = db.queue("emails")
+    queue.enqueueJson("""{"to":"alice@example.com"}""")
+    queue.enqueueJson("""{"to":"bob@example.com"}""", enqueueOptions {
+        delay(Duration.ofSeconds(60))
+    })
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -244,6 +281,37 @@ end
 loop.(loop)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+await foreach (var job in queue.ClaimAsync("worker-1"))
+{
+    try {
+        await SendEmail(job.Payload);
+        job.Ack();
+    } catch (Exception error) {
+        job.Retry(60, error.Message);
+    }
+}
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+try (WorkerHandle worker = queue.worker("worker-1", job -> {
+    sendEmail(job.payloadJson());
+})) {
+    Thread.currentThread().join();
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+queue.worker("worker-1") { job ->
+    sendEmail(job.payloadJson())
+}.use {
+    Thread.currentThread().join()
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -314,6 +382,27 @@ for job in &jobs { process(&job.payload); }
 ```go
 jobs, _ := q.ClaimBatch("worker-1", 100)
 for _, j := range jobs { process(j.Payload); j.Ack() }
+```
+  </TabItem>
+  <TabItem label=".NET">
+```csharp
+var jobs = queue.ClaimBatch("worker-1", 100);
+foreach (var job in jobs) Process(job.Payload);
+queue.AckBatch(jobs.Select(job => job.Id), "worker-1");
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+var jobs = queue.claimBatch("worker-1", 100);
+for (Job job : jobs) process(job.payloadJson());
+queue.ackBatch(jobs.stream().map(Job::id).toList(), "worker-1");
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+val jobs = queue.claimBatch("worker-1", 100)
+jobs.forEach { process(it.payloadJson()) }
+queue.ackBatch(jobs.map { it.id() }, "worker-1")
 ```
   </TabItem>
   <TabItem label="C++">

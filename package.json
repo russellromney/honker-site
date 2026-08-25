@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "npm run check:docs && astro build",
+    "check:docs": "node scripts/check-doc-capabilities.mjs",
     "preview": "astro preview",
     "astro": "astro",
     "deploy": "astro build && wrangler pages deploy dist --project-name=honker --commit-dirty=true",

@@ -22,7 +22,7 @@ hero:
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-honker adds Postgres-style `NOTIFY`/`LISTEN` semantics to SQLite, with a durable pub/sub, task queue, and event streams on the side, without client polling or a daemon/broker. Cross-process wake latency is ~2.9 ms p50 on an Apple M1 Pro (500 samples).
+honker adds Postgres-style `NOTIFY`/`LISTEN` semantics to SQLite, with a durable pub/sub, task queue, and event streams on the side, without client polling or a daemon/broker. The Python binding measured ~2.9 ms p50 cross-process wake latency on an Apple M1 Pro (500 samples).
 
 In its basic form it's a plain SQLite loadable extension, so any language that can call `load_extension` on the `libhonker_ext` file gets the same queue, streams, and notifications on the same file (every binding can tell you where that file is). Bindings for Python, Node, Rust, Go, Ruby, Bun, Elixir, C++, .NET / C#, Java, and Kotlin share one on-disk format.
 
@@ -64,7 +64,7 @@ async for job in q.claim("worker-1"):
     job.ack()
 ```
 
-Or with Huey-style decorators:
+Or with Python's Huey-style decorator convenience:
 
 ```python
 @q.task(retries=3, timeout_s=30)

@@ -1,0 +1,22 @@
+{
+  "languages": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
+  "guideCoverage": {
+    "guides/queues.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
+    "guides/streams.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
+    "guides/pubsub.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"],
+    "guides/scheduler.mdx": ["Python", "Node", "Rust", "Go", "Ruby", "Bun", "Elixir", ".NET", "Java", "Kotlin", "C++"]
+  },
+  "capabilities": {
+    "Python": { "functionTasks": "decorators-registry-cli-periodic", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
+    "Node": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": false },
+    "Rust": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": false },
+    "Go": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false },
+    "Ruby": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": "age-only", "streamFromOffset": false },
+    "Bun": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false },
+    "Elixir": { "functionTasks": "queue-primitives", "listen": "wait-api", "notificationPrune": "age-only", "streamFromOffset": false },
+    ".NET": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
+    "Java": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
+    "Kotlin": { "functionTasks": "registry", "listen": "high-level", "notificationPrune": "age-and-count", "streamFromOffset": true },
+    "C++": { "functionTasks": "queue-primitives", "listen": "high-level", "notificationPrune": "sql", "streamFromOffset": false }
+  }
+}

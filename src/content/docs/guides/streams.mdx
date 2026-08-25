@@ -91,6 +91,34 @@ s.publish({ id: 42, amount: 9900 });
 Honker.Stream.publish(db, "orders", %{id: 42, amount: 9900})
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var stream = db.Stream("orders");
+stream.Publish(new { id = 42, amount = 9900 });
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+
+try (Database db = Honker.open("app.db")) {
+    Stream stream = db.stream("orders");
+    stream.publish("{\"id\":42,\"amount\":9900}");
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.honker
+
+honker("app.db").use { db ->
+    db.stream("orders").publish("""{"id":42,"amount":9900}""")
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -209,6 +237,35 @@ end
 loop.(loop)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+await foreach (var eventRow in stream.Subscribe(consumer: "email-worker"))
+{
+    await SendOrderEmail(eventRow.Payload);
+    // Offset auto-saves every 1000 events or 1 second by default.
+}
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+
+try (StreamHandle subscription = stream.subscribe(event -> {
+    sendOrderEmail(event.payloadJson());
+}, SubscribeOptions.builder().consumer("email-worker").build())) {
+    Thread.currentThread().join();
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.asFlow
+import dev.honker.kotlin.subscribeOptions
+
+stream.asFlow(subscribeOptions { consumer("email-worker") })
+    .collect { event -> sendOrderEmail(event.payloadJson()) }
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -268,15 +325,19 @@ async for event in s.subscribe(
 
 (Calling `s.save_offset("invariant-writer", event.offset)` without `tx=` also works, but it commits outside your transaction and the atomicity is lost.)
 
-Other bindings pass the `tx` handle into their own save-offset call, or run `honker_stream_save_offset` inside the open transaction the same way — the extension-level SQL runs inside whatever transaction is open.
+Node, Bun, Rust, Ruby, Elixir, .NET, and C++ expose a typed transaction-aware save-offset call. Python, Go, Java, and Kotlin can run `honker_stream_save_offset` through the open transaction as shown above. The extension-level SQL participates in whichever transaction owns that connection.
 
 ## Replay semantics
 
-These options are Python-only — `Stream.subscribe(consumer=..., from_offset=...)`. In Node and Bun the signature is `subscribe(consumer, opts)`; calling it with no consumer crashes, and there is no `from_offset` argument.
+| Binding | Saved consumer offset | Explicit starting offset | Consumer optional |
+| --- | ---: | ---: | ---: |
+| Python | yes | `from_offset` | yes |
+| .NET | yes | `fromOffset` | yes |
+| Java, Kotlin | yes | `SubscribeOptions.fromOffset` | yes |
+| Node, Bun | yes | no | no |
+| Rust, Go, Ruby, Elixir, C++ | manual read/save APIs | pass offset to read API | n/a |
 
-- `subscribe(consumer=name)` starts from the saved offset for this consumer (0 if never saved).
-- `subscribe(from_offset=N)` starts after offset N, regardless of any saved offset.
-- `subscribe()` with no arguments replays from offset 0 — a full replay of the topic. There is no live-tail-from-now mode in Python.
+For Python, .NET, Java, and Kotlin, an explicit starting offset takes precedence over a saved consumer offset. Omitting both starts after offset 0, which replays the whole topic. None of these APIs provides a special live-tail-from-now mode; query the current maximum offset first if that is the behavior you need.
 
 ## Where it lives
 

@@ -6,11 +6,11 @@ description: What each Honker binding supports and what CI proves.
 Honker's core is Rust. The extension owns the SQLite schema and SQL
 functions. Bindings are thin language wrappers over that same shape.
 
-"Yes" means the feature has a typed binding and runs in root CI. "SQL"
-means the extension feature is available through raw SQL, but the
-language wrapper does not expose the nice API yet. "local" under Package
-proof means the proof runs outside root CI (see below). For install and ORM
-details, see the [language guides](/languages/).
+"Yes" means the feature has a typed binding. "SQL" means the extension
+feature is available through raw SQL, but the language wrapper does not expose
+the nice API yet. The Package proof column says whether the binding itself is
+tested in root CI or only by a local proof; feature-level exceptions are noted
+below. For install and ORM details, see the [language guides](/languages/).
 
 | Binding | Package proof | Queue | Streams | Notify/listen | Scheduler | Outbox | Watcher backends |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -22,10 +22,23 @@ details, see the [language guides](/languages/).
 | Go | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Bun `@russellthehippo/honker-bun` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | C++ | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Java `dev.honker:honker` | local | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Kotlin `dev.honker:honker-kotlin` | local | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Java `dev.honker:honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Kotlin `dev.honker:honker-kotlin` | local + ORM CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Ruby `honker` | yes | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
 | Elixir `honker` | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+
+## Function Task Helpers
+
+| Binding | Named handler registry | Worker dispatcher | Convenience syntax |
+| --- | ---: | ---: | --- |
+| Python | yes | CLI and in-process | `@task`, `@periodic_task` |
+| Java | yes | `runTasks` | explicit `TaskRegistry` / `TaskHandle` |
+| Kotlin | yes | `runTasks` | Kotlin helpers over the Java registry |
+| Node, Rust, Go, Ruby, Bun, Elixir, .NET, C++ | no | no | queue and result primitives only |
+
+This table describes the high-level function-task layer, not queue support.
+All bindings can enqueue jobs and reach the underlying result table through a
+typed helper or the shared extension SQL.
 
 ## What CI Proves
 
@@ -37,8 +50,10 @@ details, see the [language guides](/languages/).
   Python interop, C++, Bun, Ruby, Elixir, and Ruby/Python interop.
 - The packaged-install proof workflow builds and installs Python,
   Node, Ruby, and .NET packages into clean throwaway consumers.
-- Java and Kotlin are proven locally: Maven package tests plus a clean
-  consumer proof outside the repo. No JVM/Kotlin jobs run in PR CI.
+- PR CI builds and installs the Java artifact, runs the Java package tests,
+  and exercises the documented JVM ORM recipes. The Kotlin Exposed ORM recipe
+  also runs in PR CI. The Kotlin wrapper package tests and clean-consumer proof
+  remain local checks.
 - Node runs cross-process watcher-backend queue proofs so
   extension loading, database reopen, SHM reopen, wake delivery, and
   no-fallback behavior are exercised outside a single runtime process.

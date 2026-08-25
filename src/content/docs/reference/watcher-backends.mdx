@@ -108,6 +108,11 @@ The shm backend additionally panics if the `-shm` file is recreated (the mmap wo
 
 When the watcher panics, every active subscriber's wake channel is closed. Consumers find out programmatically:
 
+The examples and failure shapes in this section cover bindings that expose the
+raw update-event stream directly. Other bindings surface the same watcher
+failure through their queue, listener, or stream abstraction; check the
+binding's language guide for its public API.
+
 - **Rust:** `update_events().recv()` returns `Err(RecvError)`.
 - **Python:** `await events.__anext__()` raises `RuntimeError("honker: update watcher died (database file likely replaced; recreate honker.open() to recover)")`.
 - **Node:** `await events.next()` rejects with a `'watcher died'` message. Older versions reject with `"receiving on a closed channel"` instead.
@@ -115,6 +120,10 @@ When the watcher panics, every active subscriber's wake channel is closed. Consu
 Not a silent hang. Not just a line in stderr you'll never read.
 
 ### Recovery pattern
+
+The recovery snippets below are Python and Node examples, not a universal API
+shape. In every binding, the invariant is the same: close the failed database
+handle and open a new one after the database file has been replaced.
 
 ```python
 import honker
@@ -166,6 +175,10 @@ For litestream-style restore: a successful restore atomically replaces the datab
 The wait is microseconds — one `Connection::open`, one `stat`, one channel send. Once per `update_events()` call.
 
 ## Source builds
+
+These commands cover the bindings that compile the Rust watcher directly.
+Bindings that load the SQLite extension use the capabilities of the extension
+artifact they bundle or load; see [Binding support](/reference/bindings/).
 
 ```bash
 # Python (maturin)
