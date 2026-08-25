@@ -30,7 +30,7 @@ SQLite writes and are the right shape for high-volume workers.
 | Stream publish, one event per transaction | 5,800 events/s |
 | Stream replay from reader pool | 1,000,000 events/s |
 | Live stream end-to-end | p50 0.23 ms, p99 7 ms |
-| Cross-process notify/listen wake | about 0.7 ms p50 on this machine |
+| Cross-process notify/listen wake | about 2.9 ms p50 on Apple M1 Pro (500 samples) |
 
 The wake path is one `PRAGMA data_version` read every 1 ms per open
 `Database`, fan-out to N subscribers, then a normal indexed `SELECT`.
@@ -52,7 +52,7 @@ says the current watcher matters.
 ```bash
 uv run python bench/honker_bench.py --n 5000
 uv run python bench/stream_bench.py --n 5000
-uv run python bench/wake_latency_bench.py   # the 0.7 ms wake number
+uv run python bench/wake_latency_bench.py --samples 500
 cd bench/wal_index_methods && cargo run --release
 ```
 

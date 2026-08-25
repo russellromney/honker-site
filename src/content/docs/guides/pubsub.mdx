@@ -1,11 +1,11 @@
 ---
 title: Pub/Sub
-description: pg_notify-style ephemeral LISTEN/NOTIFY with 1-2 ms cross-process wake latency.
+description: pg_notify-style ephemeral LISTEN/NOTIFY with low-single-digit-ms cross-process wake latency.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-Honker's pub/sub is a direct analog of Postgres's `pg_notify` / `LISTEN`: fire-and-forget signals between processes that share a SQLite file. 1-2 ms cross-process wake latency on M-series laptops. No replay, no delivery guarantees. For that, use [Streams](/guides/streams/).
+Honker's pub/sub is a direct analog of Postgres's `pg_notify` / `LISTEN`: fire-and-forget signals between processes that share a SQLite file. An Apple M1 Pro measured 2.9 ms p50 cross-process wake latency over 500 samples. No replay, no delivery guarantees. For that, use [Streams](/guides/streams/).
 
 The wire format is the same across bindings: a Python publisher and a Go listener talk to the same channel through the same `.db` file.
 
