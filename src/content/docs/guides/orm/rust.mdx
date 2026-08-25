@@ -1,507 +1,188 @@
 ---
 title: Rust ORM integration
-description: Executable sqlx, SeaORM, and Diesel recipes for loading Honker and sharing transactions.
+description: Prefer the native honker crate for new Rust apps, or wire Honker into an existing sqlx SQLite stack.
 ---
 
-For new Rust applications, prefer the native `honker` crate. These recipes are for an existing sqlx, SeaORM, or Diesel-owned SQLite connection.
+For new Rust code, the native `honker` crate is the clean path. If you already have a sqlx app, load the SQLite extension and call the same `honker_*` functions inside your existing executors and transactions.
 
-Every code block below is synchronized byte-for-byte from the proof source that pull-request CI compiles and executes. Each proof runs the complete SQL catalog with bound parameters and verifies both commit and rollback of a business write plus `honker_enqueue`.
+## Rust: use the `honker` crate
+
+If you're writing a new Rust app, skip this section. The [`honker` crate](https://crates.io/crates/honker) wraps `rusqlite` and already gives you typed `Queue`, `Stream`, and `Database::transaction()` primitives. There is nothing to integrate — it *is* the integration.
+
+```rust
+use honker::Database;
+
+let db = Database::open("app.db")?;
+let q = db.queue("emails", Default::default());
+q.enqueue(&serde_json::json!({"to": "alice@example.com"}), Default::default())?;
+```
+
+See the [Getting Started guide](/getting-started/) (Rust tab) for the full native API. Use sqlx below only if you're retrofitting into an existing sqlx-based codebase.
+
 
 ## sqlx
 
-sqlx loads the extension from `SqliteConnectOptions`; the same connection then owns all SQL and transactions.
+### Wiring
 
-<details>
-<summary>Exact CI program: sqlx</summary>
-
-{/* orm-proof source="scripts/proof/orm/rust/src/main.rs" region="example" */}
 ```rust
-include!("../catalog.rs");
-
-use sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
-use sqlx::{ConnectOptions, Connection, Executor, Row};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Executor};
 use std::str::FromStr;
 
-fn cell(row: &SqliteRow) -> Value {
-    if let Ok(v) = row.try_get::<Option<i64>, _>(0) {
-        return v.map_or(Value::Null, |n| json!(n));
-    }
-    if let Ok(v) = row.try_get::<Option<f64>, _>(0) {
-        return v.map_or(Value::Null, |n| json!(n as i64));
-    }
-    if let Ok(v) = row.try_get::<Option<String>, _>(0) {
-        return v.map_or(Value::Null, Value::String);
-    }
-    Value::Null
+// The Rust crate links honker-core directly, so it has no bundled .so
+// to point at. Build the extension with
+// `cargo build --release -p honker-extension`, or download it from a
+// release: https://github.com/russellromney/honker/releases
+let ext = std::env::var("HONKER_EXTENSION_PATH")?;
+
+let opts = SqliteConnectOptions::from_str("sqlite://app.db")?
+    .extension(ext);
+
+let mut conn = opts.connect().await?;
+conn.execute("SELECT honker_bootstrap()").await?;
+```
+
+sqlx enables SQLite's C load-extension API only while the requested extensions load, then disables it — so SQL-injected `load_extension()` calls can't fire later in the session.
+
+### Wrapper
+
+```rust
+// src/honker_ext.rs
+use serde::Serialize;
+use sqlx::sqlite::SqliteExecutor;
+
+pub struct Queue {
+    pub name: String,
+    pub max_attempts: i32,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = std::env::var("HONKER_TEST_DB")?;
-    let ext = std::env::var("HONKER_EXTENSION_PATH")?;
-
-    let opts = SqliteConnectOptions::from_str(&format!("sqlite://{db}"))?
-        .create_if_missing(true)
-        .extension(ext);
-    let mut conn = opts.connect().await?;
-    conn.execute("SELECT honker_bootstrap()").await?;
-
-    let catalog: Value = serde_json::from_str(CATALOG)?;
-    let mut vars: HashMap<String, Value> = HashMap::new();
-    for step in catalog["steps"].as_array().unwrap() {
-        let sql = step["sql"].as_str().unwrap();
-        let mut query = sqlx::query(sql);
-        for arg in step["args"].as_array().unwrap() {
-            let resolved = resolve(arg, "rs", &vars)?;
-            query = match resolved {
-                Value::Null => query.bind(None::<String>),
-                Value::Number(n) => query.bind(n.as_i64().unwrap()),
-                Value::String(s) => query.bind(s),
-                other => return Err(format!("cannot bind {other}").into()),
-            };
-        }
-        let id = step["id"].as_str().unwrap();
-        let row = query
-            .fetch_one(&mut conn)
-            .await
-            .map_err(|e| format!("{id} failed: {e}"))?;
-        let result = cell(&row);
-        if let Some(store) = step["store"].as_str() {
-            vars.insert(store.to_string(), result.clone());
-        }
-        if !step["expect"].is_null() {
-            check(&step["expect"], &result, "rs", &vars).map_err(|e| format!("{id}: {e}"))?;
-        }
+impl Queue {
+    pub async fn enqueue<'e, E, P>(
+        &self,
+        executor: E,
+        payload: &P,
+        delay: Option<i32>,
+        priority: i32,
+    ) -> sqlx::Result<i64>
+    where
+        E: SqliteExecutor<'e>,
+        P: Serialize,
+    {
+        let payload_json = serde_json::to_string(payload)
+            .map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+        let (id,): (i64,) = sqlx::query_as(
+            "SELECT honker_enqueue($1, $2, NULL, $3, $4, $5, NULL)"
+        )
+        .bind(&self.name)
+        .bind(payload_json)
+        .bind(delay)
+        .bind(priority)
+        .bind(self.max_attempts)
+        .fetch_one(executor)
+        .await?;
+        Ok(id)
     }
+}
 
-    conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
+pub async fn notify<'e, E, P>(executor: E, channel: &str, payload: Option<&P>) -> sqlx::Result<()>
+where
+    E: SqliteExecutor<'e>,
+    P: Serialize,
+{
+    let body = payload
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+    sqlx::query("SELECT notify($1, $2)")
+        .bind(channel)
+        .bind(body)
+        .execute(executor)
         .await?;
-    let mut tx = conn.begin().await?;
-    sqlx::query("INSERT INTO orders (id, user_id) VALUES (?, ?)")
-        .bind(42_i64)
-        .bind(1_i64)
-        .execute(&mut *tx)
-        .await?;
-    let committed: i64 = sqlx::query("SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)")
-        .bind("rs_atomic")
-        .bind(r#"{"order_id":42}"#)
-        .bind(0_i64)
-        .bind(3_i64)
-        .fetch_one(&mut *tx)
-        .await?
-        .get(0);
-    tx.commit().await?;
-
-    let n: i64 = sqlx::query("SELECT COUNT(*) FROM orders WHERE id = 42")
-        .fetch_one(&mut conn)
-        .await?
-        .get(0);
-    assert_eq!(n, 1);
-    let job: String = sqlx::query("SELECT honker_get_job(?)")
-        .bind(committed)
-        .fetch_one(&mut conn)
-        .await?
-        .get(0);
-    assert!(job.contains("order_id"), "{job}");
-
-    let mut tx = conn.begin().await?;
-    sqlx::query("INSERT INTO orders (id, user_id) VALUES (?, ?)")
-        .bind(43_i64)
-        .bind(1_i64)
-        .execute(&mut *tx)
-        .await?;
-    let rolled: i64 = sqlx::query("SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)")
-        .bind("rs_atomic")
-        .bind(r#"{"order_id":43}"#)
-        .bind(0_i64)
-        .bind(3_i64)
-        .fetch_one(&mut *tx)
-        .await?
-        .get(0);
-    tx.rollback().await?;
-
-    let n: i64 = sqlx::query("SELECT COUNT(*) FROM orders WHERE id = 43")
-        .fetch_one(&mut conn)
-        .await?
-        .get(0);
-    assert_eq!(n, 0, "rollback left an order");
-    let job: String = sqlx::query("SELECT honker_get_job(?)")
-        .bind(rolled)
-        .fetch_one(&mut conn)
-        .await?
-        .get(0);
-    assert_eq!(job, "", "rollback left a job");
-
-    println!("PASS rust-sqlx");
     Ok(())
 }
 ```
-{/* /orm-proof */}
 
-</details>
+`SqliteExecutor<'e>` is sqlx's "anything you can run a query against" — satisfied by `&SqlitePool`, `&mut SqliteConnection`, and `&mut Transaction<'_, Sqlite>`, so one helper serves transactional and non-transactional callers.
 
 ## SeaORM
 
-SeaORM sits on sqlx and exposes `map_sqlx_sqlite_opts`, so extension loading remains connection-local.
+SeaORM sits on sqlx and exposes `map_sqlx_sqlite_opts`, so extension loading
+stays connection-local — every connection the pool opens gets Honker.
 
-<details>
-<summary>Exact CI program: SeaORM</summary>
+### Wiring
 
-{/* orm-proof source="scripts/proof/orm/rust/seaorm/src/main.rs" region="example" */}
 ```rust
-include!("../../catalog.rs");
+use sea_orm::{ConnectOptions, Database};
 
-use sea_orm::{
-    ConnectionTrait, Database, DbBackend, DbErr, QueryResult, Statement, TransactionTrait,
-    Value as SeaValue,
-};
-fn to_sea(value: &Value) -> SeaValue {
-    match value {
-        Value::Null => SeaValue::BigInt(None),
-        Value::Number(n) => SeaValue::BigInt(n.as_i64()),
-        Value::String(s) => SeaValue::String(Some(s.clone())),
-        other => SeaValue::String(Some(other.to_string())),
-    }
-}
+let ext = honker::extension_path()?;      // or your own path
+let mut opt = ConnectOptions::new("sqlite://app.db?mode=rwc");
+opt.map_sqlx_sqlite_opts(move |opts| unsafe { opts.extension(ext.clone()) });
 
-fn cell(row: &QueryResult) -> Value {
-    if let Ok(v) = row.try_get_by_index::<Option<i64>>(0) {
-        return match v {
-            Some(n) => json!(n),
-            None => Value::Null,
-        };
-    }
-    if let Ok(v) = row.try_get_by_index::<Option<String>>(0) {
-        return match v {
-            Some(s) => Value::String(s),
-            None => Value::Null,
-        };
-    }
-    Value::Null
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = std::env::var("HONKER_TEST_DB")?;
-    let ext = std::env::var("HONKER_EXTENSION_PATH")?;
-
-    let mut opt = sea_orm::ConnectOptions::new(format!("sqlite://{db_path}?mode=rwc"));
-    let ext_clone = ext.clone();
-    opt.map_sqlx_sqlite_opts(move |opts| unsafe { opts.extension(ext_clone.clone()) });
-    let db = Database::connect(opt).await?;
-    db.execute_unprepared("SELECT honker_bootstrap()").await?;
-
-    let catalog: Value = serde_json::from_str(CATALOG)?;
-    let mut vars: HashMap<String, Value> = HashMap::new();
-    for step in catalog["steps"].as_array().unwrap() {
-        let sql = step["sql"].as_str().unwrap();
-        let args: Vec<SeaValue> = step["args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|arg| resolve(arg, "so", &vars).map(|v| to_sea(&v)))
-            .collect::<Result<_, _>>()?;
-        let id = step["id"].as_str().unwrap();
-        let stmt = Statement::from_sql_and_values(DbBackend::Sqlite, sql, args);
-        let row = db
-            .query_one_raw(stmt)
-            .await
-            .map_err(|e| format!("{id} failed: {e}"))?
-            .ok_or_else(|| format!("{id} returned no row"))?;
-        let result = cell(&row);
-        if let Some(store) = step["store"].as_str() {
-            vars.insert(store.to_string(), result.clone());
-        }
-        if !step["expect"].is_null() {
-            check(&step["expect"], &result, "so", &vars).map_err(|e| format!("{id}: {e}"))?;
-        }
-    }
-
-    db.execute_unprepared("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
-        .await?;
-
-    let committed = db
-        .transaction::<_, i64, DbErr>(|txn| {
-            Box::pin(async move {
-                txn.execute_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "INSERT INTO orders (id, user_id) VALUES (?, ?)",
-                    [42i32.into(), 1i32.into()],
-                ))
-                .await?;
-                let row = txn
-                    .query_one_raw(Statement::from_sql_and_values(
-                        DbBackend::Sqlite,
-                        "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)",
-                        [
-                            "so_atomic".into(),
-                            r#"{"order_id":42}"#.into(),
-                            0i64.into(),
-                            3i64.into(),
-                        ],
-                    ))
-                    .await?
-                    .ok_or_else(|| DbErr::Custom("missing enqueue row".into()))?;
-                row.try_get_by_index(0)
-            })
-        })
-        .await?;
-
-    let n = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT COUNT(*) FROM orders WHERE id = 42",
-            [],
-        ))
-        .await?
-        .ok_or("missing count")?;
-    assert_eq!(n.try_get_by_index::<i64>(0)?, 1, "missing committed order");
-    let job = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT honker_get_job(?)",
-            [committed.into()],
-        ))
-        .await?
-        .ok_or("missing job")?;
-    let job_s: String = job.try_get_by_index(0)?;
-    assert!(job_s.contains("order_id"), "{job_s}");
-
-    let rolled = std::sync::Arc::new(std::sync::Mutex::new(None::<i64>));
-    let rolled_slot = rolled.clone();
-    let tx_res = db
-        .transaction::<_, (), DbErr>(|txn| {
-            Box::pin(async move {
-                txn.execute_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "INSERT INTO orders (id, user_id) VALUES (?, ?)",
-                    [43i32.into(), 1i32.into()],
-                ))
-                .await?;
-                let row = txn
-                    .query_one_raw(Statement::from_sql_and_values(
-                        DbBackend::Sqlite,
-                        "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)",
-                        [
-                            "so_atomic".into(),
-                            r#"{"order_id":43}"#.into(),
-                            0i64.into(),
-                            3i64.into(),
-                        ],
-                    ))
-                    .await?
-                    .ok_or_else(|| DbErr::Custom("missing enqueue row".into()))?;
-                let id: i64 = row.try_get_by_index(0)?;
-                *rolled_slot.lock().unwrap() = Some(id);
-                Err(DbErr::Custom("rollback".into()))
-            })
-        })
-        .await;
-    assert!(tx_res.is_err(), "expected rollback, got {tx_res:?}");
-    let rolled = rolled.lock().unwrap().expect("enqueue before rollback");
-
-    let n = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT COUNT(*) FROM orders WHERE id = 43",
-            [],
-        ))
-        .await?
-        .ok_or("missing count")?;
-    assert_eq!(n.try_get_by_index::<i64>(0)?, 0, "rollback left an order");
-    let job = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT honker_get_job(?)",
-            [rolled.into()],
-        ))
-        .await?
-        .ok_or("missing job")?;
-    let job_s: String = job.try_get_by_index(0).unwrap_or_default();
-    assert_eq!(job_s, "", "rollback left a job");
-
-    println!("PASS rust-seaorm");
-    Ok(())
-}
+let db = Database::connect(opt).await?;
+db.execute_unprepared("SELECT honker_bootstrap()").await?;
 ```
-{/* /orm-proof */}
 
-</details>
+### Business write plus enqueue, atomically
+
+`honker_enqueue` is ordinary SQL, so it commits with the transaction SeaORM
+owns. Roll back and the job is gone with the row.
+
+```rust
+use sea_orm::{DbBackend, Statement, TransactionTrait};
+
+let job_id = db.transaction::<_, i64, sea_orm::DbErr>(|txn| Box::pin(async move {
+    txn.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT INTO orders (id, user_id) VALUES (?, ?)",
+        [42i32.into(), 1i32.into()],
+    )).await?;
+
+    let row = txn.query_one_raw(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL) AS id",
+        ["emails".into(), r#"{"order_id":42}"#.into(), 0i64.into(), 3i64.into()],
+    )).await?.unwrap();
+
+    row.try_get_by_index::<i64>(0)
+})).await?;
+```
 
 ## Diesel
 
-Diesel 2.3 does not expose its raw SQLite handle. The proof briefly registers Honker with `sqlite3_auto_extension`, establishes the Diesel connection, cancels the process-global registration, and keeps the library loaded until after the connection closes.
+Diesel 2.3 does not expose its raw SQLite handle, so there is no per-connection
+hook to load an extension into. The route that works is SQLite's
+`sqlite3_auto_extension`: register Honker, open the connection, then cancel the
+registration so it does not apply process-wide to unrelated connections.
 
-Apple's system SQLite disables `sqlite3_auto_extension`. On macOS, link both Diesel and Honker against the same upstream SQLite, such as Homebrew SQLite.
+Keep the loaded library alive until after the connection closes — dropping it
+first unloads the code the connection is still using.
 
-<details>
-<summary>Exact CI program: Diesel</summary>
+### Wiring
 
-{/* orm-proof source="scripts/proof/orm/rust/diesel/src/main.rs" region="example" */}
 ```rust
-include!("../../catalog.rs");
-
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::{BigInt, Integer, Nullable, Text};
-use diesel::sqlite::{Sqlite, SqliteConnection};
+use diesel::sqlite::SqliteConnection;
+use diesel::{Connection, RunQueryDsl, sql_query};
 use libloading::Library;
-use std::os::raw::{c_char, c_int};
 
-#[derive(QueryableByName)]
-struct IdRow {
-    #[diesel(sql_type = BigInt)]
-    id: i64,
-}
+let library = unsafe { Library::new(honker::extension_path()?)? };
+let init = unsafe { *library.get::<ExtensionInit>(b"sqlite3_honkerext_init")? };
 
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    n: i64,
-}
+unsafe { libsqlite3_sys::sqlite3_auto_extension(Some(init)) };
+let mut conn = SqliteConnection::establish("app.db")?;
+unsafe { libsqlite3_sys::sqlite3_cancel_auto_extension(Some(init)) };
 
-#[derive(QueryableByName)]
-struct JobRow {
-    #[diesel(sql_type = Text)]
-    job: String,
-}
-
-type ExtensionInit = unsafe extern "C" fn(
-    *mut libsqlite3_sys::sqlite3,
-    *mut *mut c_char,
-    *const libsqlite3_sys::sqlite3_api_routines,
-) -> c_int;
-
-fn open_honker(
-    database_url: &str,
-    extension_path: &str,
-) -> Result<(SqliteConnection, Library), Box<dyn std::error::Error>> {
-    let library = unsafe { Library::new(extension_path)? };
-    let init: ExtensionInit = unsafe { *library.get(b"sqlite3_honkerext_init")? };
-    let rc = unsafe { libsqlite3_sys::sqlite3_auto_extension(Some(init)) };
-    if rc != libsqlite3_sys::SQLITE_OK {
-        return Err(format!("sqlite3_auto_extension failed: {rc}").into());
-    }
-
-    let connection = SqliteConnection::establish(database_url);
-    unsafe { libsqlite3_sys::sqlite3_cancel_auto_extension(Some(init)) };
-    Ok((connection?, library))
-}
-
-#[derive(QueryableByName)]
-struct ScalarRow {
-    #[diesel(sql_type = Text)]
-    value: String,
-}
-
-fn diesel_scalar(
-    conn: &mut SqliteConnection,
-    sql: &str,
-    args: Vec<Value>,
-) -> Result<Value, String> {
-    let wrapped = format!(
-        "WITH scalar(value) AS ({sql}) \
-         SELECT json_object('type', typeof(value), 'value', value) AS value FROM scalar"
-    );
-    let mut query = sql_query(wrapped).into_boxed::<Sqlite>();
-    for arg in args {
-        query = match arg {
-            Value::Null => query.bind::<Nullable<Text>, _>(None::<String>),
-            Value::Number(n) => {
-                query.bind::<BigInt, _>(n.as_i64().ok_or_else(|| format!("bad number {n}"))?)
-            }
-            Value::String(s) => query.bind::<Text, _>(s),
-            other => return Err(format!("cannot bind {other}")),
-        };
-    }
-    let row: ScalarRow = query.get_result(conn).map_err(|e| e.to_string())?;
-    let envelope: Value = serde_json::from_str(&row.value).map_err(|e| e.to_string())?;
-    match envelope["type"].as_str() {
-        Some("null") => Ok(Value::Null),
-        Some("integer") => Ok(json!(envelope["value"].as_i64().unwrap())),
-        Some("real") => Ok(json!(envelope["value"].as_f64().unwrap() as i64)),
-        _ => Ok(envelope["value"].clone()),
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = std::env::var("HONKER_TEST_DB")?;
-    let ext = std::env::var("HONKER_EXTENSION_PATH")?;
-
-    let (mut conn, honker_library) = open_honker(&db, &ext)?;
-    sql_query("SELECT honker_bootstrap()").execute(&mut conn)?;
-
-    run_catalog("di", |sql, args| diesel_scalar(&mut conn, sql, args))?;
-
-    sql_query("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
-        .execute(&mut conn)?;
-
-    let committed = conn.transaction(|conn| {
-        sql_query("INSERT INTO orders (id, user_id) VALUES (?, ?)")
-            .bind::<Integer, _>(42)
-            .bind::<Integer, _>(1)
-            .execute(conn)?;
-        sql_query("SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL) AS id")
-            .bind::<Text, _>("di_atomic")
-            .bind::<Text, _>(r#"{"order_id":42}"#)
-            .bind::<BigInt, _>(0_i64)
-            .bind::<BigInt, _>(3_i64)
-            .get_result::<IdRow>(conn)
-            .map(|row| row.id)
-    })?;
-
-    let n: CountRow =
-        sql_query("SELECT COUNT(*) AS n FROM orders WHERE id = 42").get_result(&mut conn)?;
-    assert_eq!(n.n, 1, "missing committed order");
-    let job: JobRow = sql_query("SELECT honker_get_job(?) AS job")
-        .bind::<BigInt, _>(committed)
-        .get_result(&mut conn)?;
-    assert!(job.job.contains("order_id"), "{}", job.job);
-
-    let mut rolled = None;
-    let tx_res: Result<(), diesel::result::Error> = conn.transaction(|conn| {
-        sql_query("INSERT INTO orders (id, user_id) VALUES (?, ?)")
-            .bind::<Integer, _>(43)
-            .bind::<Integer, _>(1)
-            .execute(conn)?;
-        rolled = Some(
-            sql_query("SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL) AS id")
-                .bind::<Text, _>("di_atomic")
-                .bind::<Text, _>(r#"{"order_id":43}"#)
-                .bind::<BigInt, _>(0_i64)
-                .bind::<BigInt, _>(3_i64)
-                .get_result::<IdRow>(conn)?
-                .id,
-        );
-        Err(diesel::result::Error::RollbackTransaction)
-    });
-    assert!(
-        matches!(tx_res, Err(diesel::result::Error::RollbackTransaction)),
-        "expected rollback, got {tx_res:?}"
-    );
-    let rolled = rolled.expect("enqueue before rollback");
-
-    let n: CountRow =
-        sql_query("SELECT COUNT(*) AS n FROM orders WHERE id = 43").get_result(&mut conn)?;
-    assert_eq!(n.n, 0, "rollback left an order");
-    let job: JobRow = sql_query("SELECT honker_get_job(?) AS job")
-        .bind::<BigInt, _>(rolled)
-        .get_result(&mut conn)?;
-    assert_eq!(job.job, "", "rollback left a job");
-
-    // The extension's callbacks remain registered on Diesel's SQLite handle.
-    // Close that handle before unloading the dynamic library that owns them.
-    drop(conn);
-    drop(honker_library);
-
-    println!("PASS rust-diesel");
-    Ok(())
-}
+sql_query("SELECT honker_bootstrap()").execute(&mut conn)?;
+// `library` must outlive `conn`
 ```
-{/* /orm-proof */}
 
-</details>
+:::caution[macOS]
+Apple's system SQLite disables `sqlite3_auto_extension`, so this route does not
+work against it. Link both Diesel and Honker against the same upstream SQLite —
+Homebrew's, for example.
+:::
 
 ## Toasty
 
-Toasty does not currently expose SQLite extension loading on its owned connection, so Honker cannot join a Toasty transaction. No example is presented as executable until Toasty provides that hook.
+Toasty does not currently expose SQLite extension loading on the connection it
+owns, so Honker cannot join a Toasty transaction. Use sqlx, SeaORM, or Diesel
+for the transactional path until Toasty provides that hook.
