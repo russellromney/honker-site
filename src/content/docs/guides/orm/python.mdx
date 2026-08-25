@@ -1,272 +1,248 @@
 ---
 title: Python ORM integration
-description: Executable SQLAlchemy, SQLModel, and Django recipes for loading Honker and sharing ORM transactions.
+description: Use Honker from SQLAlchemy, SQLModel, or Django by loading the SQLite extension and calling honker_* inside your existing transaction.
 ---
 
-These are executable examples, not parallel documentation-only versions. Every code block below is synchronized byte-for-byte from the named proof program. Pull-request CI runs those programs against the packaged Honker extension, the complete SQL catalog, and commit/rollback assertions.
+Use these recipes when your Python app already owns the SQLite connection through SQLAlchemy, SQLModel, or Django. The ORM keeps the business transaction; Honker contributes SQL functions that enqueue, notify, or stream inside that transaction.
 
-The examples use `HONKER_TEST_DB` so CI can isolate each database. In an application, replace that value with your SQLite URL or Django database setting.
+## SQLAlchemy / SQLModel
 
-Python's `sqlite3` must expose loadable extensions. Homebrew Python and most Linux distributions do; the python.org macOS build generally does not. You can check with `hasattr(sqlite3.connect(":memory:"), "enable_load_extension")`.
+SQLModel's `Session` inherits from SQLAlchemy's, so the wiring is identical for both. The only difference is which wrapper you use on top.
 
-## SQLAlchemy
+### Load the extension
 
-This program installs the connection hook, exercises every documented Honker SQL function through SQLAlchemy parameters, and proves that an order and enqueue commit or roll back together.
-
-<details>
-<summary>Exact CI program: SQLAlchemy</summary>
-
-{/* orm-proof source="scripts/proof/orm/python/sqlalchemy_orm.py" region="example" */}
 ```python
-import json
-import os
-
 import honker
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session
 
-from surface import qmark_to_named, run
-
-DB = os.environ["HONKER_TEST_DB"]
-engine = create_engine(f"sqlite:///{DB}")
-
+engine = create_engine("sqlite:///app.db")
 
 @event.listens_for(engine, "connect")
 def _load_honker(conn, _):
     honker.load_extension(conn)
     conn.execute("SELECT honker_bootstrap()")
-
-
-def scalar(sql, args):
-    named, names = qmark_to_named(sql)
-    params = dict(zip(names, args))
-    with engine.connect() as conn:
-        result = conn.execute(text(named), params).scalar()
-        conn.commit()
-        return result
-
-
-run(scalar, "sa")
-
-
-def prove_atomicity():
-    with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)"))
-
-    with engine.begin() as conn:
-        conn.execute(text("INSERT INTO orders (id, user_id) VALUES (:id, :uid)"), {"id": 42, "uid": 1})
-        job_id = conn.execute(
-            text("SELECT honker_enqueue(:q, :p, NULL, NULL, :prio, :max, NULL)"),
-            {"q": "sa_atomic", "p": json.dumps({"order_id": 42}), "prio": 0, "max": 3},
-        ).scalar_one()
-
-    with engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM orders WHERE id = 42")).scalar_one() == 1
-        job = conn.execute(text("SELECT honker_get_job(:id)"), {"id": job_id}).scalar()
-        assert job and "order_id" in job
-
-    with engine.connect() as conn:
-        trans = conn.begin()
-        conn.execute(text("INSERT INTO orders (id, user_id) VALUES (:id, :uid)"), {"id": 43, "uid": 1})
-        rolled = conn.execute(
-            text("SELECT honker_enqueue(:q, :p, NULL, NULL, :prio, :max, NULL)"),
-            {"q": "sa_atomic", "p": json.dumps({"order_id": 43}), "prio": 0, "max": 3},
-        ).scalar_one()
-        trans.rollback()
-
-    with engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM orders WHERE id = 43")).scalar_one() == 0
-        job = conn.execute(text("SELECT honker_get_job(:id)"), {"id": rolled}).scalar()
-        assert not job
-
-
-prove_atomicity()
-print("PASS sqlalchemy")
 ```
-{/* /orm-proof */}
 
-</details>
+`honker.load_extension()` finds the extension bundled in the wheel and runs the `enable_load_extension` toggle around the load, so the toggle can't be left on. `honker.extension_info()` returns the same path and its entrypoint if you'd rather load it yourself.
 
-## SQLModel
+Python's stdlib `sqlite3` must be built with `SQLITE_ENABLE_LOAD_EXTENSION`. Homebrew Python and most Linux distros have it on; the python.org macOS installer does not. Check with `hasattr(sqlite3.connect(":memory:"), "enable_load_extension")`.
 
-SQLModel's `Session` inherits SQLAlchemy's connection behavior. This variant executes the same catalog and atomicity proof through SQLModel's session API.
+### Wrapper: a thin `Queue` class
 
-<details>
-<summary>Exact CI program: SQLModel</summary>
-
-{/* orm-proof source="scripts/proof/orm/python/sqlmodel_orm.py" region="example" */}
 ```python
+# yourapp/honker_ext.py
 import json
-import os
-
-import honker
-from sqlalchemy import event
-from sqlmodel import Session, create_engine, text
-
-from surface import qmark_to_named, run
-
-DB = os.environ["HONKER_TEST_DB"]
-engine = create_engine(f"sqlite:///{DB}")
+from typing import Any, Optional
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 
-@event.listens_for(engine, "connect")
-def _load_honker(conn, _):
-    honker.load_extension(conn)
-    conn.execute("SELECT honker_bootstrap()")
+class Queue:
+    def __init__(self, name: str, *, max_attempts: int = 3):
+        self.name = name
+        self.max_attempts = max_attempts
 
-
-def scalar(sql, args):
-    named, names = qmark_to_named(sql)
-    params = dict(zip(names, args))
-    with Session(engine) as session:
-        result = session.exec(text(named), params=params).scalar_one()
-        session.commit()
-        return result
-
-
-run(scalar, "sm")
-
-
-def prove_atomicity():
-    with Session(engine) as session:
-        session.execute(text("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)"))
-        session.commit()
-
-    with Session(engine) as session:
-        session.execute(
-            text("INSERT INTO orders (id, user_id) VALUES (:id, :uid)"),
-            {"id": 42, "uid": 1},
-        )
-        job_id = session.exec(
-            text("SELECT honker_enqueue(:q, :p, NULL, NULL, :prio, :max, NULL)"),
-            params={"q": "sm_atomic", "p": json.dumps({"order_id": 42}), "prio": 0, "max": 3},
+    def enqueue(
+        self,
+        s: Session,
+        payload: Any,
+        *,
+        delay: Optional[int] = None,
+        priority: int = 0,
+    ) -> int:
+        return s.execute(
+            text(
+                "SELECT honker_enqueue("
+                " :q, :p, NULL, :d, :pr, :ma, NULL"
+                ") AS id"
+            ),
+            {
+                "q": self.name,
+                "p": json.dumps(payload),
+                "d": delay,
+                "pr": priority,
+                "ma": self.max_attempts,
+            },
         ).scalar_one()
-        session.commit()
-
-    with Session(engine) as session:
-        assert session.exec(text("SELECT COUNT(*) FROM orders WHERE id = 42")).scalar_one() == 1
-        job = session.exec(text("SELECT honker_get_job(:id)"), params={"id": job_id}).scalar_one()
-        assert job and "order_id" in job
-
-    with Session(engine) as session:
-        session.execute(
-            text("INSERT INTO orders (id, user_id) VALUES (:id, :uid)"),
-            {"id": 43, "uid": 1},
-        )
-        rolled = session.exec(
-            text("SELECT honker_enqueue(:q, :p, NULL, NULL, :prio, :max, NULL)"),
-            params={"q": "sm_atomic", "p": json.dumps({"order_id": 43}), "prio": 0, "max": 3},
-        ).scalar_one()
-        session.rollback()
-
-    with Session(engine) as session:
-        assert session.exec(text("SELECT COUNT(*) FROM orders WHERE id = 43")).scalar_one() == 0
-        job = session.exec(text("SELECT honker_get_job(:id)"), params={"id": rolled}).scalar_one()
-        assert not job
 
 
-prove_atomicity()
-print("PASS sqlmodel")
+def notify(s: Session, channel: str, payload: Any = None) -> None:
+    s.execute(
+        text("SELECT notify(:c, :p)"),
+        {"c": channel, "p": json.dumps(payload) if payload is not None else None},
+    )
 ```
-{/* /orm-proof */}
 
-</details>
+Call sites read the way you'd write them with Honker's native API:
+
+```python
+from sqlalchemy.orm import Session
+from yourapp.honker_ext import Queue, notify
+
+emails = Queue("emails")
+
+with Session(engine) as s, s.begin():
+    s.add(Order(user_id=42))
+    emails.enqueue(s, {"to": "alice@example.com"})
+    notify(s, "orders", {"id": 42})
+```
+
+### SQLModel: typed payloads with Pydantic
+
+SQLModel users get an extra move: use a Pydantic model as the payload type. Validation at enqueue, a typed `parse()` on the worker side.
+
+```python
+# yourapp/honker_ext.py
+from typing import Generic, Type, TypeVar, Optional
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlmodel import Session
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class TypedQueue(Generic[T]):
+    def __init__(self, name: str, model: Type[T], *, max_attempts: int = 3):
+        self.name = name
+        self.model = model
+        self.max_attempts = max_attempts
+
+    def enqueue(
+        self,
+        s: Session,
+        payload: T,
+        *,
+        delay: Optional[int] = None,
+        priority: int = 0,
+    ) -> int:
+        return s.execute(
+            text(
+                "SELECT honker_enqueue("
+                " :q, :p, NULL, :d, :pr, :ma, NULL"
+                ") AS id"
+            ),
+            {
+                "q": self.name,
+                "p": payload.model_dump_json(),
+                "d": delay,
+                "pr": priority,
+                "ma": self.max_attempts,
+            },
+        ).scalar_one()
+
+    def parse(self, raw: dict) -> T:
+        """Worker-side: validate a decoded job payload back into the model."""
+        return self.model.model_validate(raw)
+```
+
+Usage:
+
+```python
+from pydantic import BaseModel, EmailStr
+from sqlmodel import Session
+from yourapp.honker_ext import TypedQueue
+
+class EmailJob(BaseModel):
+    to: EmailStr
+    subject: str
+    body: str
+
+emails = TypedQueue("emails", EmailJob)
+
+with Session(engine) as s, s.begin():
+    s.add(Order(user_id=42))
+    emails.enqueue(s, EmailJob(
+        to="alice@example.com", subject="Hi", body="..."))
+```
+
+Worker, in a separate process:
+
+```python
+import asyncio, honker
+
+db = honker.open("app.db")
+
+async def run():
+    async for job in db.queue("emails").claim("worker-1"):
+        email: EmailJob = emails.parse(job.payload)  # validated
+        await send(email.to, email.subject, email.body)
+        job.ack()
+
+asyncio.run(run())
+```
+
 
 ## Django
 
-The Django proof uses `connection_created`, Django cursor parameters, and `transaction.atomic()`. Workers still open their own native Honker connection from a management command; the ORM connection is for transaction-scoped SQL calls.
+### Wiring
 
-<details>
-<summary>Exact CI program: Django</summary>
-
-{/* orm-proof source="scripts/proof/orm/python/django_orm.py" region="example" */}
 ```python
-import json
-import os
-
-import django
-from django.conf import settings
-
-settings.configure(
-    DATABASES={
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": os.environ["HONKER_TEST_DB"],
-        }
+# settings.py
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "app.db",
     },
-    INSTALLED_APPS=[],
-)
-django.setup()
+}
 
-import honker  # noqa: E402
-from django.db import connection, transaction  # noqa: E402
-from django.db.backends.signals import connection_created  # noqa: E402
-from django.dispatch import receiver  # noqa: E402
-
-from surface import run  # noqa: E402
+# apps.py (or any module imported at startup)
+from django.db.backends.signals import connection_created
+from django.dispatch import receiver
 
 
 @receiver(connection_created)
 def _load_honker(sender, connection, **kwargs):
     if connection.vendor != "sqlite":
         return
-    raw = connection.connection
+    raw = connection.connection  # underlying sqlite3.Connection
     honker.load_extension(raw)
     raw.execute("SELECT honker_bootstrap()")
-
-
-def scalar(sql, args):
-    with connection.cursor() as cur:
-        cur.execute(sql.replace("?", "%s"), args)
-        row = cur.fetchone()
-        return None if row is None else row[0]
-
-
-run(scalar, "dj")
-
-
-def prove_atomicity():
-    with connection.cursor() as cur:
-        cur.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
-
-    with transaction.atomic():
-        with connection.cursor() as cur:
-            cur.execute("INSERT INTO orders (id, user_id) VALUES (%s, %s)", [42, 1])
-            cur.execute(
-                "SELECT honker_enqueue(%s, %s, NULL, NULL, %s, %s, NULL)",
-                ["dj_atomic", json.dumps({"order_id": 42}), 0, 3],
-            )
-            job_id = cur.fetchone()[0]
-
-    with connection.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM orders WHERE id = %s", [42])
-        assert cur.fetchone()[0] == 1
-        cur.execute("SELECT honker_get_job(%s)", [job_id])
-        assert "order_id" in (cur.fetchone()[0] or "")
-
-    try:
-        with transaction.atomic():
-            with connection.cursor() as cur:
-                cur.execute("INSERT INTO orders (id, user_id) VALUES (%s, %s)", [43, 1])
-                cur.execute(
-                    "SELECT honker_enqueue(%s, %s, NULL, NULL, %s, %s, NULL)",
-                    ["dj_atomic", json.dumps({"order_id": 43}), 0, 3],
-                )
-                rolled = cur.fetchone()[0]
-            raise RuntimeError("rollback")
-    except RuntimeError as exc:
-        if str(exc) != "rollback":
-            raise
-
-    with connection.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM orders WHERE id = %s", [43])
-        assert cur.fetchone()[0] == 0
-        cur.execute("SELECT honker_get_job(%s)", [rolled])
-        assert not cur.fetchone()[0]
-
-
-prove_atomicity()
-print("PASS django")
 ```
-{/* /orm-proof */}
 
-</details>
+### Wrapper
+
+```python
+# yourapp/honker_ext.py
+import json
+from typing import Any, Optional
+from django.db import connection
+
+
+def enqueue(
+    queue: str,
+    payload: Any,
+    *,
+    delay: Optional[int] = None,
+    priority: int = 0,
+    max_attempts: int = 3,
+) -> int:
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT honker_enqueue(%s, %s, NULL, %s, %s, %s, NULL)",
+            [queue, json.dumps(payload), delay, priority, max_attempts],
+        )
+        return cur.fetchone()[0]
+
+
+def notify(channel: str, payload: Any = None) -> None:
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT notify(%s, %s)",
+            [channel, json.dumps(payload) if payload is not None else None],
+        )
+```
+
+### Usage
+
+```python
+from django.db import transaction
+from yourapp.honker_ext import enqueue, notify
+
+with transaction.atomic():
+    Order.objects.create(user_id=42)
+    enqueue("emails", {"to": "alice@example.com"})
+    notify("orders", {"id": 42})
+```
+
+Workers run as a Django management command (same pattern as Celery) using `honker.open(settings.DATABASES["default"]["NAME"])`.

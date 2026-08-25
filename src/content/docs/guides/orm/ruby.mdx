@@ -1,133 +1,69 @@
 ---
 title: Ruby ORM integration
-description: Executable ActiveRecord recipe with SQLite extension loading and transactional Honker SQL.
+description: Use Honker from ActiveRecord and Rails by loading the SQLite extension and wrapping honker_* SQL calls.
 ---
 
-ActiveRecord can load Honker through the sqlite3 gem configuration. The complete program below is synchronized byte-for-byte from the proof CI executes. It runs the shared SQL catalog through ActiveRecord's bind layer, then commits and rolls back an order with its enqueue.
+Rails and ActiveRecord can load SQLite extensions through the sqlite3 gem configuration. Once loaded, Honker calls are ordinary SQL inside `ActiveRecord::Base.transaction`.
 
-<details>
-<summary>Exact CI program: ActiveRecord</summary>
+## ActiveRecord (Rails)
 
-{/* orm-proof source="scripts/proof/orm/ruby/active_record_proof.rb" region="example" */}
-```ruby
-require "json"
-require "active_record"
-require "honker"
+As of the `sqlite3` gem 2.4+ and [Rails PR #53827](https://github.com/rails/rails/pull/53827), extensions are declared in `config/database.yml`:
 
-db = ENV.fetch("HONKER_TEST_DB")
+### Wiring
 
-ActiveRecord::Base.establish_connection(
-  adapter: "sqlite3",
-  database: db,
-  timeout: 5000,
-  extensions: [Honker.extension_path]
-)
+```yaml
+default: &default
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+  extensions:
+    - <%= Honker.extension_path %>
 
-conn = ActiveRecord::Base.connection
-conn.execute("SELECT honker_bootstrap()")
-
-catalog_path = ENV["HONKER_ORM_SURFACE"] || File.expand_path("../surface.json", __dir__)
-catalog = JSON.parse(File.read(catalog_path))
-
-def as_int(value)
-  Integer(value)
-end
-
-def as_text(value)
-  value.nil? ? "" : value.to_s
-end
-
-def resolve(token, prefix, vars)
-  return token unless token.is_a?(String)
-  return "#{prefix}_#{token[4..]}" if token.start_with?("$ns:")
-  if token.start_with?("$json:")
-    ids = token[6..].split(",").map { |k| as_int(vars.fetch(k)) }
-    return JSON.generate(ids)
-  end
-  return vars.fetch(token[1..]) if token.start_with?("$")
-  token
-end
-
-def resolve_text(text, prefix, vars)
-  out = text.dup
-  vars.each { |k, v| out = out.gsub("$#{k}", as_text(v)) }
-  out.gsub("$ns:", "#{prefix}_")
-end
-
-def check(expect, result, prefix, vars)
-  case expect["kind"]
-  when "int_gt" then raise "got #{result.inspect}" unless as_int(result) > expect["n"]
-  when "int_eq" then raise "got #{result.inspect}" unless as_int(result) == expect["n"]
-  when "int_ge" then raise "got #{result.inspect}" unless as_int(result) >= expect["n"]
-  when "int_gt_ref" then raise "got #{result.inspect}" unless as_int(result) > as_int(vars.fetch(expect["ref"]))
-  when "eq_ref" then raise "got #{result.inspect}" unless as_int(result) == as_int(vars.fetch(expect["ref"]))
-  when "json_len"
-    parsed = JSON.parse(as_text(result))
-    raise "got #{result.inspect}" unless parsed.length == expect["n"]
-  when "json_id_eq_ref"
-    parsed = JSON.parse(as_text(result))
-    raise "got #{result.inspect}" unless parsed.length == 1 && as_int(parsed[0]["id"]) == as_int(vars.fetch(expect["ref"]))
-  when "contains"
-    needle = resolve_text(expect["s"], prefix, vars)
-    raise "#{needle.inspect} not in #{result.inspect}" unless as_text(result).include?(needle)
-  when "empty_string"
-    raise "expected empty string, got #{result.inspect}" unless as_text(result) == ""
-  when "is_null"
-    raise "expected NULL, got #{result.inspect}" unless result.nil?
-  else
-    raise "unknown expect kind #{expect["kind"]}"
-  end
-end
-
-vars = {}
-catalog.fetch("steps").each do |step|
-  args = step.fetch("args").map { |a| resolve(a, "rb", vars) }
-  begin
-    result = conn.exec_query(step.fetch("sql"), step.fetch("id"), args).rows.first&.first
-  rescue StandardError => e
-    raise "#{step["id"]} failed: #{e}"
-  end
-  vars[step["store"]] = result if step["store"]
-  if step["expect"]
-    begin
-      check(step["expect"], result, "rb", vars)
-    rescue StandardError => e
-      raise "#{step["id"]}: #{e}"
-    end
-  end
-end
-
-conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)")
-
-job_id = nil
-ActiveRecord::Base.transaction do
-  conn.exec_query("INSERT INTO orders (id, user_id) VALUES (?, ?)", "ins", [42, 1])
-  job_id = conn.exec_query(
-    "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)",
-    "enq",
-    ["rb_atomic", JSON.generate({ "order_id" => 42 }), 0, 3]
-  ).rows.first.first
-end
-raise "missing committed order" unless conn.select_value("SELECT COUNT(*) FROM orders WHERE id = 42") == 1
-job = conn.exec_query("SELECT honker_get_job(?)", "get", [job_id]).rows.first.first
-raise "missing committed job" unless job.to_s.include?("order_id")
-
-rolled = nil
-ActiveRecord::Base.transaction do
-  conn.exec_query("INSERT INTO orders (id, user_id) VALUES (?, ?)", "ins", [43, 1])
-  rolled = conn.exec_query(
-    "SELECT honker_enqueue(?, ?, NULL, NULL, ?, ?, NULL)",
-    "enq",
-    ["rb_atomic", JSON.generate({ "order_id" => 43 }), 0, 3]
-  ).rows.first.first
-  raise ActiveRecord::Rollback
-end
-raise "rollback left an order" unless conn.select_value("SELECT COUNT(*) FROM orders WHERE id = 43") == 0
-job = conn.exec_query("SELECT honker_get_job(?)", "get", [rolled]).rows.first.first
-raise "rollback left a job" unless job.to_s == ""
-
-puts "PASS ruby-activerecord"
+development:
+  <<: *default
+  database: storage/app.db
 ```
-{/* /orm-proof */}
 
-</details>
+Run `SELECT honker_bootstrap()` once from an initializer or migration:
+
+```ruby
+# config/initializers/honker.rb
+Rails.application.config.after_initialize do
+  ActiveRecord::Base.connection.execute("SELECT honker_bootstrap()")
+end
+```
+
+### Wrapper
+
+```ruby
+# app/lib/honker.rb
+module Honker
+  def self.enqueue(queue, payload, delay: nil, priority: 0, max_attempts: 3)
+    sql = ActiveRecord::Base.sanitize_sql_array([
+      "SELECT honker_enqueue(?, ?, NULL, ?, ?, ?, NULL) AS id",
+      queue, payload.to_json, delay, priority, max_attempts
+    ])
+    ActiveRecord::Base.connection.select_value(sql)
+  end
+
+  def self.notify(channel, payload = nil)
+    sql = ActiveRecord::Base.sanitize_sql_array([
+      "SELECT notify(?, ?)",
+      channel, payload ? payload.to_json : nil
+    ])
+    ActiveRecord::Base.connection.execute(sql)
+  end
+end
+```
+
+### Usage
+
+```ruby
+ActiveRecord::Base.transaction do
+  Order.create!(user_id: 42)
+  Honker.enqueue("emails", { to: "alice@example.com" })
+  Honker.notify("orders", { id: 42 })
+end
+```
+
+Workers run as a separate process using the [`honker` Ruby gem](https://rubygems.org/gems/honker).
