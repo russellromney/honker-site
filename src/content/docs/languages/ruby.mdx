@@ -37,6 +37,18 @@ if job
 end
 ```
 
+## Pub/Sub
+
+```ruby
+db.listen("orders") do |notification|
+  puts notification.payload
+end
+```
+
+`Database#listen` is live-only and channel-filtered. It returns an enumerable
+listener when no block is given; call `listener.next(timeout_s: 5)` for a
+bounded wait and `listener.close` when finished.
+
 ## Transactional Outbox
 
 ```ruby

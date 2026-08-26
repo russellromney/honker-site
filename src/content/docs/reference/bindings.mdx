@@ -24,8 +24,8 @@ below. For install and ORM details, see the [language guides](/languages/).
 | C++ | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Java `dev.honker:honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 | Kotlin `dev.honker:honker-kotlin` | local + ORM CI | yes | yes | yes | yes | yes | poll, kernel, shm |
-| Ruby `honker` | yes | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
-| Elixir `honker` | CI | yes | yes | notify yes, wait API | yes | yes | poll, kernel, shm |
+| Ruby `honker` | yes | yes | yes | yes | yes | yes | poll, kernel, shm |
+| Elixir `honker` | CI | yes | yes | yes | yes | yes | poll, kernel, shm |
 
 ## Function Task Helpers
 
@@ -71,5 +71,3 @@ typed helper or the shared extension SQL.
   see the same saved checkpoint.
 - Long soak on every OS. The scary nightly workflow soaks Linux; PR CI
   stays shorter.
-- Ruby and Elixir expose notifications and update-waiting without
-  the same high-level async listener shape as Python/Node/.NET/Rust/Go/Bun/C++/JVM.
