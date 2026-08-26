@@ -168,12 +168,19 @@ for notif in db.listen("orders")? {
   </TabItem>
   <TabItem label="Go">
 ```go
-sub, _ := db.Listen("orders")
-defer sub.Close()
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
 
-for notif := range sub.Channel() {
+for notif := range db.Listen(ctx, "orders") {
     fmt.Println(notif.Channel, string(notif.Payload))
 }
+```
+  </TabItem>
+  <TabItem label="Ruby">
+```ruby
+db.listen("orders") do |notification|
+  puts "#{notification.channel} #{notification.payload}"
+end
 ```
   </TabItem>
   <TabItem label="Bun">
@@ -181,6 +188,22 @@ for notif := range sub.Channel() {
 for await (const notif of db.listen("orders")) {
   console.log(notif.channel, notif.payload);
 }
+```
+  </TabItem>
+  <TabItem label="Elixir">
+```elixir
+{:ok, subscription} = Honker.listen(db, "orders")
+ref = subscription.ref
+
+receive_loop = fn loop ->
+  receive do
+    {:honker_notification, ^ref, notification} ->
+      IO.inspect({notification.channel, notification.payload})
+      loop.(loop)
+  end
+end
+
+receive_loop.(receive_loop)
 ```
   </TabItem>
   <TabItem label=".NET">
@@ -233,8 +256,6 @@ int main() {
 ```
   </TabItem>
 </Tabs>
-
-Ruby and Elixir currently expose `notify` plus `wait_for_update`, but not a high-level channel listener. In those bindings, snapshot `MAX(id)` when attaching, wait for database updates, and query `_honker_notifications` for newer rows on the desired channel. See [Binding support](/reference/bindings/) for the API-shape distinction.
 
 ## Cross-process
 

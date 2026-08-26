@@ -36,6 +36,23 @@ case Honker.Queue.claim_one(db, "emails", "worker-1") do
 end
 ```
 
+## Pub/Sub
+
+```elixir
+{:ok, subscription} = Honker.listen(db, "orders")
+ref = subscription.ref
+
+receive do
+  {:honker_notification, ^ref, notification} ->
+    IO.inspect(notification.payload)
+end
+
+Honker.unlisten(subscription)
+```
+
+Subscriptions are live-only and channel-filtered. They stop automatically
+when the subscribing process exits, or explicitly through `Honker.unlisten/1`.
+
 ## Transactional Outbox
 
 ```elixir

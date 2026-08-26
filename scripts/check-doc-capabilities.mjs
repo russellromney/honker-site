@@ -185,8 +185,6 @@ for (const language of matrix.languages) {
 
 const filesWithKnownRegressions = [pubsubPath, streamsPath, 'reference/bindings.mdx'];
 const forbidden = [
-  'db.listen("orders") do |notif|',
-  'Honker.listen(db, "orders")',
   'These options are Python-only',
   'available from any binding',
   'No JVM/Kotlin jobs run in PR CI',
