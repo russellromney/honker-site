@@ -5,9 +5,9 @@ description: Durable pub/sub with per-consumer offsets.
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-Streams are the durable cousin of pub/sub. Every event is a row in `_honker_stream`, consumers track offsets in `_honker_stream_consumers`, and replay-on-reconnect is built in. Use streams when you want at-least-once delivery or catch-up after a disconnect. Use [pub/sub](/guides/pubsub/) when you only care about live signals and don't need history.
+Streams are the durable cousin of pub/sub. Every event is a row in `_honker_stream`, consumers track offsets in `_honker_stream_consumers`, and replay-on-reconnect is built in. Use streams when you need catch-up after a disconnect. At-least-once processing depends on when the binding saves its offset; see [Processing guarantees](#processing-guarantees) below. Use [pub/sub](/guides/pubsub/) when you only care about live signals and don't need history.
 
-The on-disk format is identical across bindings: a Go publisher and a Python consumer can run against the same `.db` file.
+The on-disk stream event format is shared across bindings: a Go publisher and a Python consumer can run against the same `.db` file.
 
 ## Publish
 
@@ -91,6 +91,34 @@ s.publish({ id: 42, amount: 9900 });
 Honker.Stream.publish(db, "orders", %{id: 42, amount: 9900})
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+var stream = db.Stream("orders");
+stream.Publish(new { id = 42, amount = 9900 });
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+
+try (Database db = Honker.open("app.db")) {
+    Stream stream = db.stream("orders");
+    stream.publish("{\"id\":42,\"amount\":9900}");
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.honker
+
+honker("app.db").use { db ->
+    db.stream("orders").publish("""{"id":42,"amount":9900}""")
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -121,9 +149,9 @@ SELECT honker_stream_publish('orders', NULL, '{"id":42,"amount":9900}');
   </TabItem>
 </Tabs>
 
-## Subscribe with auto-offset-save
+## Consume and checkpoint
 
-A named consumer resumes where it left off. The iterator amortizes offset saves across events so the single-writer slot doesn't thrash.
+A named consumer resumes where it left off. Most bindings provide a subscription that checkpoints on a cadence; Ruby and Elixir expose the same behavior as an explicit read/process/save loop.
 
 <Tabs syncKey="language">
   <TabItem label="Python">
@@ -143,31 +171,18 @@ for await (const event of s.subscribe('email-worker')) {
   </TabItem>
   <TabItem label="Rust">
 ```rust
-loop {
-    let batch = s.read_from_consumer("email-worker", 100)?;
-    if batch.is_empty() {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        continue;
-    }
-    for event in &batch {
-        send_order_email(&event.payload)?;
-    }
-    s.save_offset("email-worker", batch.last().unwrap().offset)?;
+let mut subscription = s.subscribe("email-worker")?;
+for event in &mut subscription {
+    let event = event?;
+    send_order_email(&event.payload)?;
 }
 ```
   </TabItem>
   <TabItem label="Go">
 ```go
-for {
-    batch, _ := s.ReadFromConsumer("email-worker", 100)
-    if len(batch) == 0 {
-        time.Sleep(100 * time.Millisecond)
-        continue
-    }
-    for _, event := range batch {
-        sendOrderEmail(event.Payload)
-    }
-    s.SaveOffset("email-worker", batch[len(batch)-1].Offset)
+ctx := context.Background()
+for event := range s.Subscribe(ctx, "email-worker") {
+    sendOrderEmail(event.Payload)
 }
 ```
   </TabItem>
@@ -207,6 +222,35 @@ loop = fn loop ->
   end
 end
 loop.(loop)
+```
+  </TabItem>
+  <TabItem label=".NET">
+```csharp
+await foreach (var eventRow in stream.Subscribe(consumer: "email-worker"))
+{
+    await SendOrderEmail(eventRow.Payload);
+    // Offset auto-saves every 1000 events or 1 second by default.
+}
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+
+try (StreamHandle subscription = stream.subscribe(event -> {
+    sendOrderEmail(event.payloadJson());
+}, SubscribeOptions.builder().consumer("email-worker").build())) {
+    Thread.currentThread().join();
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.kotlin.asFlow
+import dev.honker.kotlin.subscribeOptions
+
+stream.asFlow(subscribeOptions { consumer("email-worker") })
+    .collect { event -> sendOrderEmail(event.payloadJson()) }
 ```
   </TabItem>
   <TabItem label="C++">
@@ -268,15 +312,38 @@ async for event in s.subscribe(
 
 (Calling `s.save_offset("invariant-writer", event.offset)` without `tx=` also works, but it commits outside your transaction and the atomicity is lost.)
 
-Other bindings pass the `tx` handle into their own save-offset call, or run `honker_stream_save_offset` inside the open transaction the same way — the extension-level SQL runs inside whatever transaction is open.
+| Binding | Transaction-aware offset save |
+| --- | --- |
+| Node, Rust, Go, Ruby, Bun, Elixir, .NET, C++ | Typed transaction-aware method |
+| Python, Java, Kotlin | Run `honker_stream_save_offset` through the open transaction |
+
+The extension-level SQL participates in whichever transaction owns that connection.
 
 ## Replay semantics
 
-These options are Python-only — `Stream.subscribe(consumer=..., from_offset=...)`. In Node and Bun the signature is `subscribe(consumer, opts)`; calling it with no consumer crashes, and there is no `from_offset` argument.
+| Binding | Saved consumer offset | Explicit starting offset | Consumer optional |
+| --- | ---: | ---: | ---: |
+| Python | yes | `from_offset` | yes |
+| .NET | yes | `fromOffset` | yes |
+| Java, Kotlin | yes | `SubscribeOptions.fromOffset` | yes |
+| Node, Rust, Go, Bun, C++ | yes | no | no |
+| Ruby, Elixir | manual read/save APIs | pass offset to read API | n/a |
 
-- `subscribe(consumer=name)` starts from the saved offset for this consumer (0 if never saved).
-- `subscribe(from_offset=N)` starts after offset N, regardless of any saved offset.
-- `subscribe()` with no arguments replays from offset 0 — a full replay of the topic. There is no live-tail-from-now mode in Python.
+For Python, .NET, Java, and Kotlin, an explicit starting offset takes precedence over a saved consumer offset. Omitting both starts after offset 0, which replays the whole topic. None of these APIs provides a special live-tail-from-now mode; query the current maximum offset first if that is the behavior you need.
+
+:::caution[Node named-consumer interoperability]
+The current Node wrapper passes its stream topic and consumer name to the extension in reverse order when saving and loading offsets. Node-to-Node resume is internally consistent, but another binding using the same consumer name will not see that checkpoint. Event publishing and reading remain interoperable. Fix the wrapper before relying on a shared named-consumer checkpoint across Node and another binding.
+:::
+
+## Processing guarantees
+
+Durable storage does not by itself mean that every high-level subscriber waits for your application work before saving its offset.
+
+- **Python and .NET** save a previous event only when the consumer asks for the next event. **Java** advances after its callback returns. These shapes replay an event when its handler fails before that point.
+- **Node, Bun, Rust, Go, and C++** may persist an offset on a cadence or when the subscription closes without knowing whether downstream application work committed. **Kotlin `Flow`** uses the Java callback to hand an event into a coroutine channel, so the Java runtime can consider delivery complete before the collector finishes processing it.
+- **Ruby and Elixir** expose manual read/save loops, so the application chooses when to advance.
+
+For a strict at-least-once processing boundary, the Python/.NET iterator shape and Java callback save only after successful processing as described above. In the other bindings, use the manual read/save APIs and advance only after successful work; disabling the periodic cadence alone is not sufficient when a subscription final-flushes its current offset. For exactly-once-within-one SQLite transaction, save the offset alongside the downstream write as shown above.
 
 ## Where it lives
 

@@ -67,7 +67,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { label: 'Queues', slug: 'guides/queues' },
-            { label: 'Tasks (decorators)', slug: 'guides/tasks' },
+            { label: 'Function tasks', slug: 'guides/tasks' },
             { label: 'Streams', slug: 'guides/streams' },
             { label: 'Pub/Sub', slug: 'guides/pubsub' },
             { label: 'Scheduler', slug: 'guides/scheduler' },

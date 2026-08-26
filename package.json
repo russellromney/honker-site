@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "npm run check:docs && astro build",
+    "check:docs": "node scripts/check-doc-capabilities.mjs",
     "preview": "astro preview",
     "astro": "astro",
-    "deploy": "astro build && wrangler pages deploy dist --project-name=honker --commit-dirty=true",
-    "deploy:preview": "astro build && wrangler pages deploy dist --project-name=honker --branch=preview --commit-dirty=true"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=honker --commit-dirty=true",
+    "deploy:preview": "npm run build && wrangler pages deploy dist --project-name=honker --branch=preview --commit-dirty=true"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.34.0",

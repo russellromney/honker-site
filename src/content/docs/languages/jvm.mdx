@@ -123,6 +123,28 @@ runBlocking {
 }
 ```
 
+## Function Tasks
+
+Java and Kotlin provide first-class named task registries, task handles,
+workers, and stored results. Registration is explicit: the Java runtime does
+not scan annotations, and the Kotlin wrapper does not add a decorator-like API.
+
+```java
+var registry = new TaskRegistry(db);
+var task = registry.register(
+    "send-email", "tasks", call -> "{\"sent\":true}"
+);
+var result = task.enqueue("[\"alice@example.com\"]", "{}");
+
+try (var worker = db.runTasks(registry)) {
+    var value = result.waitFor(WaitOptions.timeout(Duration.ofSeconds(10)));
+}
+```
+
+Kotlin adds `db.taskRegistry()`, `registerJson`, `enqueueJson`, and suspending
+`TaskResult.await` helpers over the same runtime. See [Function tasks](/guides/tasks/)
+for both examples and the shared queue-envelope format.
+
 ## Transactional Outbox
 
 ```java

@@ -3,9 +3,9 @@ title: Watcher backends
 description: How honker spots database changes — the default polling backend, two opt-in alternatives, and what happens when the database file is swapped under the watcher.
 ---
 
-Honker wakes consumers on every database commit. By default, one background thread per database asks SQLite "did anything change?" every millisecond. That's it.
+Honker watches for committed database changes and wakes consumers so they can re-read state. By default, one background thread per database asks SQLite "did anything change?" every millisecond. Several commits inside one polling interval can coalesce into one wake.
 
-Two opt-in alternatives exist for advanced users. Both are experimental and source-only — not in published wheels yet.
+Two opt-in alternatives exist for advanced users. In the Rust-backed Python and Node packages, both are experimental and source-build-only. The JVM implements equivalent backends in Java and ships them in its artifact; configuration entry points vary in the other bindings. See [Binding support](/reference/bindings/) before selecting one outside the Python, Node, or Rust APIs shown here.
 
 This page is for people who:
 
@@ -43,21 +43,21 @@ let shm = SharedUpdateWatcher::new_with_config(
 );
 ```
 
-The kernel and shm backends are gated behind Cargo features (`kernel-watcher`, `shm-fast-path`). Published wheels (`pip install honker`, `npm install`) build polling-only. To use the experimental backends today, build from source with the feature on — see [Source builds](#source-builds) below.
+In the Rust watcher, the kernel and shm backends are gated behind Cargo features (`kernel-watcher`, `shm-fast-path`). The published Python wheel and Node native package build polling-only. To use the experimental Rust backends today, build from source with the feature on — see [Source builds](#source-builds) below. These Cargo flags do not control the JVM's Java implementations.
 
 ## At a glance
 
-| backend | wake source | spurious wakes | missed wakes | journal mode | shipped in wheels |
+| backend | wake source | spurious wakes | delayed/coalesced wakes | journal mode | Python/Node prebuilt package |
 |---|---|---|---|---|---|
-| `polling` (default) | `PRAGMA data_version` every 1 ms | never | never | any | yes |
+| `polling` (default) | `PRAGMA data_version` every 1 ms | never | possible between polls | any | yes |
 | `kernel` | OS file events on db file + parent dir + `-wal`/`-shm`/`-journal` | possible | possible (if the OS drops events) | any | no — source only |
-| `shm` | mmap read of SQLite's WAL index every 1 ms | never | never (mmap inode-change → panic) | WAL only | no — source only |
+| `shm` | mmap read of SQLite's WAL index every 1 ms | never | possible between polls (mmap inode-change → panic) | WAL only | no — source only |
 
 ## When to choose which
 
-- **Stay on polling** unless you have a specific reason to switch. It's the only backend that promises every wake fires once and only once. It works in every journal mode. It's the only one in published wheels. The CPU cost — about 3.5 ms per second of busy work — is rounding error on any modern machine.
+- **Stay on polling** unless you have a specific reason to switch. It does not depend on an OS event queue, and consumers re-read state after a wake; multiple commits between checks can still coalesce. It works in every journal mode and is the backend in the prebuilt Python and Node packages. The CPU cost — about 2.0 ms per second of busy work on the benchmark machine — is rounding error on any modern machine.
 - **Try kernel** if you're running many honker'd databases on one host and want idle CPU near zero, or if you're on Linux and want wakes faster than 1 ms. The catch: some wakes can be lost if the OS drops events under load. Consumers re-read state on every wake, so a lost wake means delayed work, not lost work.
-- **Try shm** if you're on a high-QPS WAL workload and the per-check cost of the 1 ms poll matters (rare). The cadence stays at 1 ms like polling, but each check drops from a ~3.5 µs `PRAGMA data_version` read to a memory load. The catch: it reads SQLite's WAL index format directly, so a future SQLite version that changes that format would break it.
+- **Try shm** if you're on a high-QPS WAL workload and the per-check cost of the 1 ms poll matters (rare). The cadence stays at 1 ms like polling, but each check drops from a ~2.0 µs `PRAGMA data_version` read to a memory load. The catch: it reads SQLite's WAL index format directly, so a future SQLite version that changes that format would break it.
 
 Rule of thumb: if you can't say in one sentence what you'd gain by switching, stay on polling.
 
@@ -65,7 +65,7 @@ Rule of thumb: if you can't say in one sentence what you'd gain by switching, st
 
 ### Polling (default)
 
-One background thread per database. Every millisecond, it runs `PRAGMA data_version` on a read-only connection. That counter goes up after any commit by any process, in any journal mode. Around 3.5 microseconds per check. One thread regardless of subscriber count.
+One background thread per database. Every millisecond, it runs `PRAGMA data_version` on a read-only connection. That counter changes after commits by another connection, in any journal mode. Around 2.0 microseconds per check on the standalone Rust benchmark machine. One thread regardless of subscriber count.
 
 The polling backend keeps its connection through transient `SQLITE_BUSY` / `SQLITE_LOCKED` errors. Those happen when a writer is mid-commit on a rollback-journal mode (DELETE / TRUNCATE / PERSIST) and the watcher's PRAGMA can't get a lock. Instead of dropping the connection and reconnecting (which would silently re-baseline and miss wakes), it just retries the next millisecond. So non-WAL workloads get reliable wake delivery even during writer-locked windows.
 
@@ -87,7 +87,7 @@ Bad:
 Reads `iChange` at byte 8 of SQLite's WAL index header (`-shm` file) via mmap. SQLite increments `iChange` on every WAL write. The watcher compares the current value to the previous one every millisecond and fires a wake on change.
 
 Good:
-- Cheaper checks. A memory load instead of a SQLite query — the per-check cost drops from ~3.5 µs to sub-microsecond (the poll cadence is still 1 ms).
+- Cheaper checks. A memory load instead of a SQLite query — the per-check cost drops from ~2.0 µs to sub-microsecond (the poll cadence is still 1 ms).
 - Same low cost under heavy load.
 
 Bad:
@@ -108,6 +108,11 @@ The shm backend additionally panics if the `-shm` file is recreated (the mmap wo
 
 When the watcher panics, every active subscriber's wake channel is closed. Consumers find out programmatically:
 
+The examples and failure shapes in this section cover bindings that expose the
+raw update-event stream directly. Other bindings surface the same watcher
+failure through their queue, listener, or stream abstraction; check the
+binding's language guide for its public API.
+
 - **Rust:** `update_events().recv()` returns `Err(RecvError)`.
 - **Python:** `await events.__anext__()` raises `RuntimeError("honker: update watcher died (database file likely replaced; recreate honker.open() to recover)")`.
 - **Node:** `await events.next()` rejects with a `'watcher died'` message. Older versions reject with `"receiving on a closed channel"` instead.
@@ -115,6 +120,10 @@ When the watcher panics, every active subscriber's wake channel is closed. Consu
 Not a silent hang. Not just a line in stderr you'll never read.
 
 ### Recovery pattern
+
+The recovery snippets below are Python and Node examples, not a universal API
+shape. In every binding, the invariant is the same: close the failed database
+handle and open a new one after the database file has been replaced.
 
 ```python
 import honker
@@ -166,6 +175,12 @@ For litestream-style restore: a successful restore atomically replaces the datab
 The wait is microseconds — one `Connection::open`, one `stat`, one channel send. Once per `update_events()` call.
 
 ## Source builds
+
+These commands cover the Rust wrapper and the Python/Node bindings that compile
+the Rust watcher directly. The FFI bindings depend on the watcher capabilities
+of the native artifact they load or link. The JVM is different again: its
+watchers are implemented in Java and are not selected by Cargo feature flags.
+See [Binding support](/reference/bindings/).
 
 ```bash
 # Python (maturin)

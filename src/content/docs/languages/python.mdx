@@ -38,6 +38,25 @@ if job:
     job.ack()
 ```
 
+## Function Tasks
+
+Python provides the highest-level task convenience API: `@q.task` and
+`@q.periodic_task` decorators, a process-global handler registry, in-process
+workers, and a `python -m honker worker` CLI.
+
+```python
+@q.task(name="send-email", retries=3)
+def send_email(to):
+    return {"sent": True, "to": to}
+
+result = send_email("alice@example.com")
+# In another process: python -m honker worker myapp.tasks:db --queue=emails
+print(result.get(timeout=10))
+```
+
+See [Function tasks](/guides/tasks/) for worker startup, results, stable names,
+periodic tasks, and the Java/Kotlin registry equivalent.
+
 ## Transactional Outbox
 
 Use the outbox when the durable database commit should trigger an external

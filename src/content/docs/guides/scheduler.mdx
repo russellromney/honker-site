@@ -157,6 +157,60 @@ Honker.Scheduler.add(db,
 Honker.Scheduler.run(db, "host-a", fn -> false end)
 ```
   </TabItem>
+  <TabItem label=".NET">
+```csharp
+using Honker;
+
+using var db = Database.Open("app.db");
+db.Scheduler.Add(new ScheduledTask(
+    Name: "nightly-backup",
+    Queue: "backups",
+    Payload: new { target = "s3" },
+    Cron: "0 3 * * *",
+    ExpiresSeconds: 3600
+));
+
+await db.Scheduler.RunAsync("host-a");
+```
+  </TabItem>
+  <TabItem label="Java">
+```java
+import dev.honker.*;
+import java.time.Duration;
+
+try (Database db = Honker.open("app.db")) {
+    Scheduler scheduler = db.scheduler();
+    scheduler.add(
+        "nightly-backup",
+        "backups",
+        CronSchedule.crontab("0 3 * * *"),
+        "{\"target\":\"s3\"}"
+    );
+    try (SchedulerHandle worker = scheduler.run()) {
+        Thread.currentThread().join();
+    }
+}
+```
+  </TabItem>
+  <TabItem label="Kotlin">
+```kotlin
+import dev.honker.CronSchedule
+import dev.honker.kotlin.honker
+
+honker("app.db").use { db ->
+    val scheduler = db.scheduler()
+    scheduler.add(
+        "nightly-backup",
+        "backups",
+        CronSchedule.crontab("0 3 * * *"),
+        """{"target":"s3"}"""
+    )
+    scheduler.run().use {
+        Thread.currentThread().join()
+    }
+}
+```
+  </TabItem>
   <TabItem label="C++">
 ```cpp
 #include "honker.hpp"
@@ -254,7 +308,7 @@ sched.remove("recap");
 
 ### Bounded recurrence ("run N times then stop")
 
-Honker doesn't ship a `max_runs` column — the question of "what counts as N" (fires, claims, successful completions) is application logic. The simple pattern: keep your own counter and `unschedule` when it hits the bound.
+Honker doesn't ship a `max_runs` column — the question of "what counts as N" (fires, claims, successful completions) is application logic. The simple pattern is to keep your own counter and remove the schedule when it hits the bound. This example uses Python's function-task decorator:
 
 ```python
 @db.queue("snapshots").task()
