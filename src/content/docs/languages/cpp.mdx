@@ -31,6 +31,49 @@ if (job) {
 }
 ```
 
+## Job details and typed payloads
+
+A claimed `Job` and a `JobSnapshot` from `get_job` both carry the
+[twelve job fields](/guides/queues/#job-fields) as accessors, and C++ is the
+one binding that keeps the core's `snake_case` names verbatim: `run_at()`,
+`worker_id()`, `claim_expires_at()`, `max_attempts()`, `created_at()`,
+`expires_at()`.
+
+```cpp
+auto q = db.queue("emails");
+auto id = q.enqueue(R"({"to":"alice@example.com"})");
+
+if (auto snap = q.get_job(id)) {
+    // snap->state() == "pending"; worker_id() and claim_expires_at() are
+    // std::nullopt until a worker claims it.
+    auto payload = nlohmann::json::parse(snap->payload());
+}
+
+if (auto job = q.claim_one("worker-1")) {
+    auto payload = nlohmann::json::parse(job->payload());
+    std::cout << payload["to"].get<std::string>()
+              << " " << job->attempts() << "/" << job->max_attempts() << '\n';
+    job->ack();
+}
+```
+
+On a `JobSnapshot`, `worker_id()`, `claim_expires_at()`, and `expires_at()`
+return `std::optional`. On a claimed `Job` the first two are unwrapped — the
+claim guarantees them — and only `expires_at()` stays optional.
+
+`payload()` returns `std::string` on both types: the raw JSON text. There is no
+typed queue, no `Job<T>`, and no decode helper. Parse it yourself.
+
+### You own the payload's validity
+
+C++ is the binding most exposed to the
+[JSON payload contract](/guides/queues/#payloads-must-be-valid-json).
+`Queue::enqueue` takes a `std::string_view payload_json` and passes the bytes
+straight through to `honker_cpp_enqueue`, whose parameter is a bare
+`const char* payload_json`. Nothing in the C++ layer builds or checks that JSON
+for you, so an invalid payload fails at the database boundary rather than at
+your call site. Serialize with a real JSON library and you will not hit it.
+
 ## Transactional Outbox
 
 ```cpp

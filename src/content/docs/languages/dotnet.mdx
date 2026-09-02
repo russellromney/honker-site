@@ -36,6 +36,49 @@ if (job is not null)
 }
 ```
 
+## Job details and typed payloads
+
+Claimed jobs and read-only snapshots carry the
+[twelve job fields](/guides/queues/#job-fields) in PascalCase (`RunAt`,
+`WorkerId`, `ClaimExpiresAt`, `MaxAttempts`, `CreatedAt`, `ExpiresAt`).
+
+Watch the queue-name property, which is spelled two ways: `Job` and
+`JobSnapshot<T>` call it `QueueName`, while the untyped `JobRow` calls it
+`Queue`.
+
+`db.Queue<T>(name)` returns a `TypedQueue<T>`:
+
+```csharp
+sealed record EmailPayload(string Recipient);
+
+var emails = db.Queue<EmailPayload>("emails");
+
+long id = emails.Enqueue(new EmailPayload("alice@example.com"),
+    new EnqueueOptions(Priority: 7));
+
+Job<EmailPayload>? job = emails.ClaimOne("worker-1");
+if (job is not null)
+{
+    Console.WriteLine($"{job.Payload!.Recipient} {job.Attempts}/{job.MaxAttempts}");
+    job.Ack();
+}
+
+JobSnapshot<EmailPayload>? snapshot = emails.GetJob(id);
+// snapshot.State is "pending" until claimed; WorkerId and ClaimExpiresAt are
+// null until then. PayloadRaw holds the raw JSON text alongside Payload.
+```
+
+The typed path decodes for you on both sides. The untyped `Queue` gives you
+`Job` (payload as a `JsonElement`, plus `GetPayload<T>()`) and `JobRow`
+(payload as raw JSON text).
+
+On a claimed job, `WorkerId` and `ClaimExpiresAt` are non-null — the
+constructor throws if the core returns a claim without them. On a snapshot both
+are nullable, along with `ExpiresAt`.
+
+`TPayload` is a compile-time contract only. honker never validates payload
+shape at runtime.
+
 ## Transactional Outbox
 
 ```csharp

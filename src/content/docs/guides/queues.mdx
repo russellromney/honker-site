@@ -207,8 +207,8 @@ ones that can fail:
   layer passes that string through untouched; there is no encode step to make
   it valid for you.
 
-In both cases an invalid payload now fails loudly at enqueue instead of landing
-a row that no consumer can decode.
+In both cases an invalid payload fails loudly at enqueue instead of landing a
+row that no consumer can decode.
 
 ### Finding existing bad rows
 

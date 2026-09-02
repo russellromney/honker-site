@@ -34,6 +34,56 @@ if job != nil {
 }
 ```
 
+## Job details and typed payloads
+
+A claimed `Job` and a `JobRow` snapshot from `GetJob` both carry the
+[twelve job fields](/guides/queues/#job-fields), renamed to Go's exported
+casing (`RunAt`, `WorkerID`, `ClaimExpiresAt`, `MaxAttempts`, `CreatedAt`,
+`ExpiresAt`).
+
+Go has no typed queue handle. It has one generic helper, `DecodePayload[T]`,
+which you call wherever you need the payload as your own type:
+
+```go
+type EmailPayload struct {
+    Recipient string `json:"recipient"`
+}
+
+q := db.Queue("emails", honker.QueueOptions{})
+
+id, err := q.Enqueue(EmailPayload{Recipient: "alice@example.com"}, honker.EnqueueOptions{})
+if err != nil { return err }
+
+job, err := q.ClaimOne("worker-1")
+if err != nil { return err }
+if job != nil {
+    email, err := honker.DecodePayload[EmailPayload](job.Payload)
+    if err != nil { return err }
+    fmt.Println(email.Recipient, job.Attempts, "/", job.MaxAttempts)
+    job.Ack()
+}
+```
+
+`Job.Payload` is `[]byte`. The snapshot's `JobRow.Payload` is a `string`, with
+`PayloadBytes()` to bridge:
+
+```go
+row, err := q.GetJob(id)
+if err != nil { return err }
+if row != nil {
+    // row.WorkerID and row.ClaimExpiresAt are nil pointers while pending.
+    email, err := honker.DecodePayload[EmailPayload](row.PayloadBytes())
+    _ = email
+}
+```
+
+On a claimed `Job`, `WorkerID` and `ClaimExpiresAt` are plain values — the
+claim sets both. On a `JobRow` they are pointers, along with `ExpiresAt`, so
+`nil` means the job has not been claimed.
+
+`DecodePayload` is a compile-time convenience. honker never validates payload
+shape at runtime.
+
 ## Transactional Outbox
 
 ```go
