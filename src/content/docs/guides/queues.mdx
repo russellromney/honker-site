@@ -168,6 +168,74 @@ SELECT honker_enqueue('emails', '{"to":"bob"}', NULL, 60, 0, 3, NULL);
   </TabItem>
 </Tabs>
 
+## Payloads must be valid JSON
+
+honker stores every job payload as JSON text, and it enforces that on write. The
+contract is exactly this, and nothing more:
+
+> **A payload must be valid JSON.**
+
+There is no required top-level shape. Bare scalars are valid JSON, so they are
+valid payloads:
+
+```json
+42
+"ready"
+true
+null
+```
+
+An object is the common choice, but honker neither requires one nor looks at
+your keys.
+
+The same rule applies to the other honker write paths that take a payload:
+`notify()`, stream publish, scheduler task payloads, and saved task results.
+
+### This does not change normal use
+
+Every language binding JSON-encodes the value you hand to `enqueue` before it
+reaches the database. If you call `enqueue` through a binding, you cannot
+violate the contract — the encoding step guarantees it.
+
+Two paths hand honker a string that the binding never encoded, and those are the
+ones that can fail:
+
+- **Raw `honker_enqueue` SQL**, whether you run it through the loadable
+  extension directly or through an ORM's raw-SQL escape hatch. You supply the
+  payload text yourself, so you own its validity.
+- **C++.** `honker_cpp_enqueue` takes a bare `const char* payload_json`. The C++
+  layer passes that string through untouched; there is no encode step to make
+  it valid for you.
+
+In both cases an invalid payload now fails loudly at enqueue instead of landing
+a row that no consumer can decode.
+
+### Finding existing bad rows
+
+No table rebuild is needed. To check whether a database already holds payloads
+that would be rejected:
+
+```sql
+SELECT id FROM _honker_live WHERE NOT json_valid(payload);
+```
+
+An empty result means every live row satisfies the contract.
+
+### Valid on write is not a decode guarantee
+
+honker validates with a fast structural parse, which is slightly more permissive
+than a full decode. Two kinds of text pass the enqueue check and can still fail
+when a consumer decodes them:
+
+- **A lone UTF-16 surrogate**, such as `"\ud800"`. Both Python's and Node's JSON
+  serializers can emit these.
+- **A number outside the range the reader's float type can hold**, such as
+  `1e999`.
+
+So do not read the contract as "accepted at enqueue, therefore decodable
+everywhere". It is a write-side contract. If you produce payloads from text you
+did not sanitize, validate them in your own producer as well.
+
 ## Claim and ack
 
 Claiming moves a row to `state='processing'` and sets `claim_expires_at = unixepoch() + visibility_timeout_s`. If the worker doesn't ack before that window elapses, another worker can reclaim.
@@ -351,6 +419,58 @@ SELECT honker_ack_batch('[1,2,3]', 'worker-1');
   </TabItem>
 </Tabs>
 
+## Job fields
+
+A claimed job and a read-only snapshot from `get_job` both carry the same twelve
+fields. The core returns them as `snake_case` JSON; each binding renames them to
+whatever its own conventions call for (`run_at` becomes `runAt` in Node and Bun,
+`RunAt` in Go and .NET, and stays `run_at` in Python, Ruby, and Elixir). See your
+binding's page for the exact spelling.
+
+| Field | Type | What it means |
+| --- | --- | --- |
+| `id` | integer | The job's id. Ids are globally unique across every queue, not per-queue. |
+| `queue` | string | The queue this job belongs to. |
+| `payload` | JSON | What you enqueued. |
+| `state` | string | `pending` (waiting to be claimed) or `processing` (claimed by a worker). A claimed job is always `processing`. |
+| `priority` | integer | Higher is claimed first. Default `0`. |
+| `run_at` | unix seconds | The earliest time the job may be claimed. Set from `delay` / `run_at` at enqueue, and moved forward by every `retry`. This is scheduled eligibility, not when the job was created. |
+| `worker_id` | string, nullable | The worker holding the current claim. `null` on a pending job; always set on a claimed one. |
+| `claim_expires_at` | unix seconds, nullable | When the current claim lapses and another worker may reclaim the job. `null` on a pending job. Each `heartbeat` moves it to *now + extend*, so it advances for the whole life of a long job. |
+| `attempts` | integer | How many times the job has been claimed. Incremented by the claim itself, so a freshly claimed job already reads `1`. |
+| `max_attempts` | integer | The attempt budget. Once `attempts` reaches it, the job dead-letters instead of retrying. Default `3`. |
+| `created_at` | unix seconds | When the job was enqueued. Never changes. |
+| `expires_at` | unix seconds, nullable | The job drops out of the queue if it has not been claimed by then. `null` means it never expires. |
+
+### run_at is not created_at
+
+These two are easy to confuse and they answer different questions.
+`created_at` is fixed at enqueue and never moves. `run_at` is a schedule: a job
+enqueued with `delay=60` has a `run_at` sixty seconds after its `created_at`,
+and each `retry` pushes `run_at` further out while `created_at` stays put. To
+ask "when did this job first enter the system", read `created_at`.
+
+### What these fields cannot tell you
+
+They cannot answer **"how long has this job been running?"**. `claim_expires_at`
+moves on every heartbeat, so it tracks the deadline, not the start. `attempts`
+counts claims, not time. Answering that needs the timestamp of the current
+claim, which these twelve fields do not carry.
+
+### Decoded payload, or raw JSON text?
+
+Bindings do not yet agree on this, and it is the one part of the job shape you
+cannot assume.
+
+Some bindings decode the payload for you and hand back a value. Others hand
+back the payload exactly as stored — raw JSON text or bytes — and leave the
+decode to you, usually with a helper that takes the target type. A single
+binding can do one for a claimed job and the other for a snapshot.
+
+The table in [Typed payloads](#typed-payloads) gives the answer per binding for
+both cases. Check it before assuming, and decode defensively in code that runs
+against more than one binding.
+
 ## Batch claim
 
 For handlers that benefit from batching (DB writes, HTTP calls), claim N jobs in one transaction:
@@ -493,6 +613,9 @@ q.cancel(id);                 // true / false (idempotent)
 `cancel` of a processing row invalidates the worker's claim — its next `ack()` returns `false`, same shape as an expired claim. It does **not** interrupt a worker that's currently running the handler. If you need the handler to actually stop, build that signal in your app (check a flag, etc.); honker doesn't propagate cancellation to running handlers.
 
 `get_job` only returns rows from `_honker_live` (pending or processing). For dead jobs query `_honker_dead` directly.
+
+The snapshot carries the same twelve fields a claimed job does — see
+[Job fields](#job-fields) for what each one means.
 
 Both methods are available in every binding except Java/Kotlin (Python, Node, Bun, Rust crate, Go, Ruby, Elixir, .NET, C++). The JVM bindings don't expose them yet — call `honker_cancel` / `honker_get_job` over raw SQL there.
 
