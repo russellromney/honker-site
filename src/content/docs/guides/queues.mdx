@@ -457,6 +457,13 @@ moves on every heartbeat, so it tracks the deadline, not the start. `attempts`
 counts claims, not time. Answering that needs the timestamp of the current
 claim, which these twelve fields do not carry.
 
+The core does record that timestamp. `_honker_live` has a nullable `claimed_at`
+column, and both `honker_claim_batch` and `honker_get_job` return it in their
+JSON. No binding maps it onto its job type yet, so it is not reachable from any
+of the APIs these pages document — only by reading the core function's JSON
+yourself. Per-binding support is tracked in
+[honker issue #135](https://github.com/russellromney/honker/issues/135).
+
 ### Decoded payload, or raw JSON text?
 
 Bindings do not yet agree on this, and it is the one part of the job shape you
