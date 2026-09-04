@@ -38,6 +38,51 @@ if job:
     job.ack()
 ```
 
+## Job details and typed payloads
+
+A claimed job and a `get_job` snapshot both carry the
+[twelve job fields](/guides/queues/#job-fields). Python keeps the core's
+`snake_case` names, with one exception: `Job.queue` is the `Queue` handle, so
+the queue *name* is `Job.queue_name`.
+
+`Queue` and `Job` are generic, so you can annotate a queue with its payload
+type. `db.queue()` itself is not generic — put the type on the variable:
+
+```python
+from typing import TypedDict
+import honker
+
+class EmailPayload(TypedDict):
+    recipient: str
+
+db = honker.open("app.db")
+emails: honker.Queue[EmailPayload] = db.queue("emails")
+
+job_id = emails.enqueue({"recipient": "alice@example.com"}, priority=7)
+
+job = emails.claim_one("worker-1")
+if job:
+    print(job.payload["recipient"], job.attempts, "/", job.max_attempts)
+    job.ack()
+```
+
+`get_job` returns a `JobSnapshot`, which is a `TypedDict` — a plain dict at
+runtime, keyed by the core's column names. Its `payload` is the raw JSON text,
+not a decoded value:
+
+```python
+import json
+
+row = emails.get_job(job_id)      # dict, or None
+if row:
+    print(row["state"])           # "pending" until a worker claims it
+    print(row["worker_id"])       # None while pending
+    payload = json.loads(row["payload"])
+```
+
+The type parameter is a hint for your type checker only. honker never validates
+payload shape at runtime.
+
 ## Function Tasks
 
 Python provides the highest-level task convenience API: `@q.task` and

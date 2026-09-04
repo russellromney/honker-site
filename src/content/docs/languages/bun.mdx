@@ -38,6 +38,50 @@ if (job) {
 }
 ```
 
+## Job details and typed payloads
+
+A claimed job and a `getJob` snapshot both carry the
+[twelve job fields](/guides/queues/#job-fields), renamed to camelCase
+(`runAt`, `workerId`, `claimExpiresAt`, `maxAttempts`, `createdAt`,
+`expiresAt`).
+
+`db.queue<T>(name)` returns a `Queue<T>`, and the payload type flows into
+`enqueue`, `claimOne`, `claimBatch`, and the claim waker:
+
+```ts
+import { open, type Job, type JobSnapshot } from "@russellthehippo/honker-bun";
+
+interface EmailPayload {
+  recipient: string;
+  template: "welcome" | "receipt";
+}
+
+const db = open("app.db", "./libhonker_ext.dylib");
+const emails = db.queue<EmailPayload>("emails");
+
+const id = emails.enqueue({ recipient: "alice@example.com", template: "welcome" });
+
+const job: Job<EmailPayload> | null = emails.claimOne("worker-1");
+if (job) {
+  console.log(job.payload.recipient, job.attempts, "/", job.maxAttempts);
+  job.ack();
+}
+```
+
+`getJob` is the one place the type does **not** flow: it returns a plain
+`JobSnapshot` whose `payload` is the raw JSON text. Decode it yourself:
+
+```ts
+const snapshot: JobSnapshot | null = emails.getJob(id);
+if (snapshot) {
+  const payload = JSON.parse(snapshot.payload) as EmailPayload;
+  // snapshot.workerId and snapshot.claimExpiresAt are null while pending.
+}
+```
+
+The type parameter is a TypeScript contract only. honker never validates
+payload shape at runtime.
+
 ## Transactional Outbox
 
 ```ts

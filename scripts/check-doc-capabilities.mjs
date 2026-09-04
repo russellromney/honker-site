@@ -110,6 +110,7 @@ const requiredCapabilities = [
   'notificationPrune',
   'streamSubscription',
   'streamOffsetTx',
+  'typedPayloads',
 ];
 for (const language of matrix.languages) {
   const capability = matrix.capabilities[language];
@@ -154,6 +155,16 @@ for (const language of matrix.languages) {
     ? taskDescriptions[kind]
     : taskDescriptions[kind]?.[language];
   checkTableCell(taskRows, language, 0, expected, `${tasksPath} function-task table`);
+}
+
+const queuesPath = 'guides/queues.mdx';
+const queues = await readFile(path.join(docsRoot, queuesPath), 'utf8');
+const typedRows = parseBindingTable(queues, 'Typed payloads', queuesPath);
+for (const language of matrix.languages) {
+  const typed = matrix.capabilities[language].typedPayloads;
+  for (const [index, key] of ['surface', 'checked', 'claimed', 'snapshot'].entries()) {
+    checkTableCell(typedRows, language, index, typed[key], `${queuesPath} typed-payload table`);
+  }
 }
 
 const pubsubPath = 'guides/pubsub.mdx';

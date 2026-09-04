@@ -123,6 +123,78 @@ runBlocking {
 }
 ```
 
+## Job details and typed payloads
+
+Claimed jobs and read-only snapshots carry the
+[twelve job fields](/guides/queues/#job-fields) as lowerCamelCase accessors,
+with `payload` spelled `payloadJson()` because it holds raw JSON text.
+
+Nullability is carried by the boxing: `workerId()`, `claimExpiresAt()`, and
+`expiresAt()` are boxed (`String`, `Long`, `Long`) on a snapshot because they
+can be null; `id()`, `runAt()`, and `createdAt()` are primitives.
+
+### Java
+
+The typed surface is a `TypedQueue<T>` built from a `JsonCodec<T>` you supply —
+the binding ships no JSON library, so `encode` and `decode` are yours:
+
+```java
+record Email(String recipient) {}
+
+// encode/decode are yours — use whatever JSON library you already have.
+JsonCodec<Email> codec = new JsonCodec<>() {
+    public String encode(Email value) { return myJson.write(value); }
+    public Email decode(String json) { return myJson.read(json, Email.class); }
+};
+
+Queue raw = db.queue("emails");
+TypedQueue<Email> emails = raw.typed(codec);
+
+long id = emails.enqueue(new Email("alice@example.com"),
+    EnqueueOptions.builder().priority(4).build());
+
+TypedJob<Email> job = emails.claimOne("worker-1").orElseThrow();
+System.out.println(job.payload().recipient() + " " + job.attempts() + "/" + job.maxAttempts());
+job.ack();
+
+TypedJobSnapshot<Email> snapshot = emails.getJob(id).orElseThrow();
+// snapshot.state() is "pending" until claimed; workerId() is null until then.
+```
+
+Without a codec, `Queue.claimOne` gives you a plain `Job` and
+`Queue.getJob` an `Optional<JobSnapshot>`, both exposing `payloadJson()` as
+raw text.
+
+### Kotlin
+
+Kotlin reuses the Java job types and adds a `JobDetails<T>` data class that
+restates the fields with honest Kotlin nullability, plus `details()` and
+`jobDetails()` to build one:
+
+```kotlin
+data class Email(val recipient: String)
+
+val emails = db.queue("emails").typed(codec)
+
+val id = emails.enqueue(Email("alice@example.com"), enqueueOptions { priority(4) })
+
+val pending: JobDetails<Email>? = emails.jobDetails(id)
+// pending.state == "pending"; pending.workerId and pending.claimExpiresAt are null
+
+val claimed = emails.claimOne("worker-1").orElseThrow()
+val details = claimed.details()          // JobDetails<Email>
+println("${details.payload.recipient} ${details.attempts}/${details.maxAttempts}")
+claimed.ack()
+```
+
+`JobDetails<T>` carries both `payload` (decoded to `T`) and `payloadJson` (the
+raw text). Called without a codec, `jobDetails(id)` returns a
+`JobDetails<String>` whose `payload` is that raw text.
+
+The type parameter is a compile-time contract only. honker never validates
+payload shape at runtime — the codec you supply is the only thing that ever
+looks at the payload.
+
 ## Function Tasks
 
 Java and Kotlin provide first-class named task registries, task handles,

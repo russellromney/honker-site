@@ -36,6 +36,47 @@ if (job) {
 }
 ```
 
+## Job details and typed payloads
+
+A claimed job and a `getJob` snapshot both carry the
+[twelve job fields](/guides/queues/#job-fields), renamed to camelCase
+(`runAt`, `workerId`, `claimExpiresAt`, `maxAttempts`, `createdAt`,
+`expiresAt`).
+
+`db.queue<T>(name)` returns a `Queue<T>`, and the payload type flows into
+`enqueue`, `claimOne`, `claimBatch`, `claimWaker`, and `getJob`:
+
+```ts
+import { open, type Job, type JobSnapshot } from "@russellthehippo/honker-node";
+
+interface EmailPayload {
+  recipient: string;
+  template: "welcome" | "receipt";
+}
+
+const db = open("app.db");
+const emails = db.queue<EmailPayload>("emails");
+
+const id = emails.enqueue({ recipient: "alice@example.com", template: "welcome" });
+
+const job: Job<EmailPayload> | null = emails.claimOne("worker-1");
+if (job) {
+  console.log(job.payload.recipient, job.attempts, "/", job.maxAttempts);
+  job.ack();
+}
+
+const snapshot: JobSnapshot<EmailPayload> | null = emails.getJob(id);
+// snapshot.state is "pending" | "processing"; workerId and claimExpiresAt are
+// null while the job is pending.
+```
+
+Node decodes the payload on both paths — a claimed `job.payload` and a
+`getJob` snapshot's `payload` are both already-parsed values.
+
+The type parameter is a TypeScript contract only. honker never validates
+payload shape at runtime, so every producer writing to `emails` has to agree on
+`EmailPayload` by itself.
+
 ## Transactional Outbox
 
 ```js

@@ -37,6 +37,45 @@ if job
 end
 ```
 
+## Job details and typed payloads
+
+A claimed `Job` and a `JobSnapshot` from `get_job` both carry the
+[twelve job fields](/guides/queues/#job-fields) under the core's `snake_case`
+names, with one exception: `Job#queue_name` holds the queue name, because
+`@queue` is the queue object.
+
+```ruby
+q = db.queue("emails")
+id = q.enqueue({to: "alice@example.com"}, priority: 7)
+
+job = q.claim_one("worker-1")
+if job
+  job.payload          # already parsed: {"to" => "alice@example.com"}
+  job.queue_name       # "emails"
+  job.state            # "processing"
+  job.attempts         # 1
+  job.ack
+end
+```
+
+`get_job` returns a `JobSnapshot` struct. Unlike a claimed job, its `payload`
+is the raw JSON text — parse it yourself:
+
+```ruby
+snap = q.get_job(id)       # JobSnapshot, or nil
+if snap
+  snap.state               # "pending" until claimed
+  snap.worker_id           # nil while pending
+  JSON.parse(snap.payload)
+end
+```
+
+The snapshot answers to both `#queue` and `#queue_name` for the queue name.
+
+Ruby has no typed payload surface — payloads are whatever `JSON.parse`
+produces. honker never validates payload shape at runtime, so every producer on
+a queue has to agree on the shape by itself.
+
 ## Pub/Sub
 
 ```ruby

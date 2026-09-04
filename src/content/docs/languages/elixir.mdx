@@ -36,6 +36,40 @@ case Honker.Queue.claim_one(db, "emails", "worker-1") do
 end
 ```
 
+## Job details and typed payloads
+
+A claimed `%Honker.Job{}` and a `%Honker.JobSnapshot{}` from `get_job/2` both
+carry the [twelve job fields](/guides/queues/#job-fields) under the core's
+`snake_case` names.
+
+Both are structs, so use dot access — not string-key map access:
+
+```elixir
+{:ok, id} = Honker.Queue.enqueue(db, "emails", %{"to" => "alice@example.com"}, priority: 7)
+
+{:ok, job} = Honker.Queue.claim_one(db, "emails", "worker-1")
+job.payload        # already decoded: %{"to" => "alice@example.com"}
+job.state          # "processing"
+job.attempts       # 1
+{:ok, true} = Honker.Job.ack(db, job)
+```
+
+`get_job/2` returns a snapshot whose `payload` is the raw JSON text, unlike a
+claimed job's decoded payload:
+
+```elixir
+{:ok, snap} = Honker.Queue.get_job(db, id)
+snap.state                    # "pending" until claimed
+snap.worker_id                # nil while pending
+Jason.decode!(snap.payload)
+```
+
+On a claimed job, only `expires_at` is nullable. On a snapshot, `worker_id`,
+`claim_expires_at`, and `expires_at` are all nullable.
+
+Elixir has no typed payload surface. honker never validates payload shape at
+runtime, so every producer on a queue has to agree on the shape by itself.
+
 ## Pub/Sub
 
 ```elixir

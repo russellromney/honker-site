@@ -46,6 +46,56 @@ if let Some(job) = q.claim_one("worker-1")? {
 }
 ```
 
+## Job details and typed payloads
+
+A claimed `Job` and a `JobRow` snapshot from `get_job` both carry the
+[twelve job fields](/guides/queues/#job-fields) under the core's own
+`snake_case` names — no renaming.
+
+`Database::typed_queue::<T>` gives you a `Queue<T>`, and the type flows into
+`enqueue`, `claim_one`, `claim_batch`, and `get_job`:
+
+```rust
+use honker::{Database, EnqueueOpts, QueueOpts};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct Email {
+    recipient: String,
+}
+
+let db = Database::open("app.db")?;
+let emails = db.typed_queue::<Email>("emails", QueueOpts::default());
+
+let id = emails.enqueue(&Email { recipient: "alice@example.com".into() }, EnqueueOpts::default())?;
+
+if let Some(job) = emails.claim_one("worker-1")? {
+    let email: Email = job.payload_typed()?;
+    println!("{} attempt {}/{}", email.recipient, job.attempts, job.max_attempts);
+    job.ack()?;
+}
+```
+
+Rust does not decode the payload for you. A claimed `Job` holds `payload:
+Vec<u8>` and a `JobRow` holds `payload: String`; both offer `payload_typed()`
+for the queue's `T`, and `payload_as::<U>()` when you want a different type at
+one call site:
+
+```rust
+if let Some(row) = emails.get_job(id)? {
+    // row.worker_id and row.claim_expires_at are None while pending.
+    let email: Email = row.payload_typed()?;
+}
+```
+
+On a claimed `Job`, `worker_id` and `claim_expires_at` are plain values — a
+claim guarantees both. On a `JobRow` they are `Option`, along with
+`expires_at`.
+
+The type parameter is a compile-time convenience. honker never validates
+payload shape at runtime; a mismatch surfaces as a `serde` error when you call
+`payload_typed()`.
+
 ## Transactional Outbox
 
 ```rust
