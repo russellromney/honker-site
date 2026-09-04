@@ -210,31 +210,60 @@ ones that can fail:
 In both cases an invalid payload fails loudly at enqueue instead of landing a
 row that no consumer can decode.
 
-### Finding existing bad rows
+### Three shapes that used to be accepted
 
-No table rebuild is needed. To check whether a database already holds payloads
-that would be rejected:
+honker validates by fully decoding the payload, the same way a consumer reads it
+back. That is deliberate: a cheaper structural check would accept text the
+reader then chokes on, and the contract would be a promise honker could not
+keep. Accepted at enqueue now means decodable.
 
-```sql
-SELECT id FROM _honker_live WHERE NOT json_valid(payload);
-```
-
-An empty result means every live row satisfies the contract.
-
-### Valid on write is not a decode guarantee
-
-honker validates with a fast structural parse, which is slightly more permissive
-than a full decode. Two kinds of text pass the enqueue check and can still fail
-when a consumer decodes them:
+The cost is that three kinds of text used to be stored silently and are now
+rejected at the producer:
 
 - **A lone UTF-16 surrogate**, such as `"\ud800"`. Both Python's and Node's JSON
   serializers can emit these.
-- **A number outside the range the reader's float type can hold**, such as
-  `1e999`.
+- **A number outside the range a reader's float type can hold**, such as `1e999`.
+- **Nesting deeper than 128 levels.**
 
-So do not read the contract as "accepted at enqueue, therefore decodable
-everywhere". It is a write-side contract. If you produce payloads from text you
-did not sanitize, validate them in your own producer as well.
+All three are valid JSON by the grammar, so the error says the payload could not
+be decoded rather than that it is malformed — you are not looking for a syntax
+error you do not have.
+
+If you produce payloads from text you did not sanitize, this is the change most
+likely to surface it. It surfaces at enqueue, where you can still do something
+about it, instead of in a consumer at 3am.
+
+### Finding existing bad rows
+
+Existing rows are not revalidated, and no table rebuild is needed. Finding the
+bad ones is harder than it looks.
+
+The obvious query is incomplete:
+
+```sql
+-- Finds outright non-JSON only. Misses the three shapes above.
+SELECT id FROM _honker_live WHERE NOT json_valid(payload);
+```
+
+SQLite's `json_valid` and honker's decoder do not agree. Measured on SQLite
+3.51.0, `json_valid` returns `1` for lone surrogates, for `1e999`, and for
+deeply nested text — exactly the three shapes honker now rejects. The
+disagreement runs one way, so everything that query finds is genuinely bad; it
+just does not find everything.
+
+There is no SQL-only check today, because the extension exposes no validator
+function. Until it does, sweep by reading candidate rows back through a binding
+and catching the decode error. Two tables hold payloads:
+
+```sql
+SELECT id, payload FROM _honker_live;
+SELECT id, payload FROM _honker_scheduler_tasks WHERE payload IS NOT NULL;
+```
+
+Check the scheduler table first. A legacy bad row in `_honker_live` sits inert
+until something reads it. One in `_honker_scheduler_tasks` stops **every**
+schedule: the tick that walks the table errors, no task's next fire time
+advances, and healthy schedules stop firing until you repair the row.
 
 ## Claim and ack
 
